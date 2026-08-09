@@ -10,7 +10,7 @@
 - [x] 0e: 8GiB FS tavanının kaldırılması (64 grup limiti; mkfs grup hesabı + 16GiB e2e testi)
 
 ## Faz 1 — Gerçek donanım boot + girdi
-- [ ] 1a: i8042 proper init (controller test, port enable/devre, timeout'lar, USB legacy emu disable)
+- [x] 1a: i8042 proper init (controller test, port enable/devre, timeout'lar, USB legacy emu disable) — `kernel/src/ps2.rs`; QEMU E2E: xlate+set1, IRQ1, help komutu kanıtlı; USB legacy 1e/ACPI'ye devredildi
 - [ ] 1b: UEFI imajı QEMU'da ilk test (solaros-uefi.img; Secure Boot kapalı)
 - [ ] 1c: Gerçek makinede ilk boot denemesi (UEFI imaj -> USB; ekran/serial debug döngüsü)
 - [ ] 1d: XHCI driver (USB klavye, EHCI fallback)
@@ -31,10 +31,11 @@
 - [ ] 3d: NVMe driver (AHCI sonrası, opsiyonel)
 
 ## Faz 4 — Günlük kullanım eşiği + kurulum
-- [ ] 4a: Windows install/kesme scripti (gerçek diske/USB'ye imaj yazım) + kullanım kılavuzu
-- [ ] 4b: reboot/shutdown (ACPI FADT reset, QEMU isa-debug-exit)
-- [ ] 4c: RTC/CMOS saat (gerçek zaman; boot mesajı + uptime)
-- [ ] 4d: Metin editörü + dosya araçları + login akışı süsleme
+- [ ] 4a: ISO imajı üretimi (BIOS+UEFI çift boot, bootloader imajlarını paketleyen script) — "direkt sisteme yüklenebilir" hedef çıktı
+- [ ] 4b: Windows install/kesme scripti (ISO'dan gerçek diske/USB'ye yazım) + kullanım kılavuzu
+- [ ] 4c: reboot/shutdown (ACPI FADT reset, QEMU isa-debug-exit)
+- [ ] 4d: RTC/CMOS saat (gerçek zaman; boot mesajı + uptime)
+- [ ] 4e: Metin editörü + dosya araçları + login akışı süsleme
 
 ## Sürekli bakım
 - [ ] Her faz sonunda ext4 e2e + JBD crash testlerini yeniden koş (regresyon)

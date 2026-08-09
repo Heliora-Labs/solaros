@@ -12,6 +12,7 @@ mod framebuffer;
 mod fs;
 mod interrupts;
 mod keyboard;
+mod ps2;
 mod serial;
 mod settings;
 mod terminal;
@@ -172,6 +173,18 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     USABLE_MB.store(usable_bytes / 1024 / 1024, Ordering::Relaxed);
 
     boot::info(format_args!("Booting SolarOS {}...", OS_VERSION));
+
+    let ps2 = ps2::init();
+    if ps2.controller_ok && ps2.device_ok {
+        boot::ok(format_args!(
+            "PS/2: controller self-test passed, scancode set 1, IRQ1 armed"
+        ));
+    } else {
+        boot::fail(format_args!(
+            "PS/2: degraded mode (ctrl ok: {}, device ok: {})",
+            ps2.controller_ok, ps2.device_ok
+        ));
+    }
 
     interrupts::init();
     interrupts::sleep_ms(120);
