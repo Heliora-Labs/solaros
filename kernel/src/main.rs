@@ -4,6 +4,8 @@
 
 mod ata;
 mod boot;
+mod acpi;
+mod apic;
 mod commands;
 mod crc;
 mod ext4;
@@ -189,6 +191,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     interrupts::init();
     interrupts::sleep_ms(120);
 
+    let acpi = acpi::init(boot_info);
+    if let Some(a) = &acpi {
+        let _ = apic::init(a);
+    }
+
     match fb_info {
         Some(info) => boot::ok(format_args!(
             "Framebuffer: {}x{} px, {} BPP ({:?}), stride {}",
@@ -314,8 +321,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 }
 
 static BOOTLOADER_CONFIG: bootloader_api::BootloaderConfig = {
+    use bootloader_api::config::Mapping;
     let mut c = bootloader_api::BootloaderConfig::new_default();
     c.kernel_stack_size = 1024 * 1024;
+    c.mappings.physical_memory = Some(Mapping::FixedAddress(0xFFFF_8000_0000_0000));
     c
 };
 

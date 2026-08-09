@@ -15,7 +15,10 @@
   - Gerekli düzeltmeler (kernel `interrupts.rs`): `pic_unmask_all()` (OVMF maskeli IRQ bırakıyor; BIOS'ta maskesiz), PIT 1kHz self-arm (`pit_set_rate`, 0x43/0x40), `sleep_ms` artık tick=ms tabanlı; uptime saniye hesabı `/1000`. BIOS'un PIT'i arm etmesine güven yok — kernel kendisi kuruyor.
 - [ ] 1c: Gerçek makinede ilk boot denemesi (UEFI imaj -> USB; ekran/serial debug döngüsü)
 - [ ] 1d: XHCI driver (USB klavye, EHCI fallback)
-- [ ] 1e: ACPI RSDP/RSDT + MADT parse; IOAPIC + LAPIC init; IRQ override'ları (IRQ0->IRQ2, klavye polarite); PIC kapatma
+- [x] 1e: ACPI RSDP/RSDT + MADT parse; IOAPIC + LAPIC init; IRQ override'ları (IRQ0->GSI2, klavye); PIC kapatma
+  - `kernel/src/acpi.rs`: PMO penceresi (0xFFFF_8000_0000_0000) ile RSDP/RSDT/XSDT + `Acpi::find`; `BootloaderConfig.mappings.physical_memory` ile tüm fiziksel bellek kernel'e açıldı (bootloader sayfa tablosu high-kernel+fb dışını identity'siz bırakıyordu; 0x1004000 vb. problar fault -> kök neden fiziksel adreslerin eşlenmemiş olmasıydı)
+  - `kernel/src/apic.rs`: MADT (0x2C'den başlayan kayıtlar — Length toplam tablo boyutu, header değil!), ISO override (IRQ0->GSI2), IOAPIC pin mask + PIT->vec32/klavye->vec33, LAPIC SVR enable, PIC full mask; handler'larda koşulsuz LAPIC EOI (0xFEE000B0 sabit adres, lock'suz — handler-init lock ölümcül: STATE.lock() içinde IRQ düşerdi, ~%50 silent stall)
+  - BIOS (smp4, 8s boot) + UEFI/OVMF (52s) E2E: `[ OK ] APIC:` satırları + klavye "status" komutu -> uptime tıklıyor
 - [ ] 1f: LAPIC timer kalibrasyonu ve zamanlama altyapısı (PIT fallback)
 
 ## Faz 2 — Bellek + süreçler

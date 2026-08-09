@@ -157,6 +157,15 @@ fn pic_unmask_all() {
     }
 }
 
+pub fn pic_mask_all() {
+    unsafe {
+        let mut pic0 = Port::<u8>::new(0x21);
+        let mut pic1 = Port::<u8>::new(0xA1);
+        pic0.write(0xFF);
+        pic1.write(0xFF);
+    }
+}
+
 extern "x86-interrupt" fn divide_error_handler(frame: InterruptStackFrame) {
     exception("DIVIDE ERROR", &frame)
 }
@@ -194,6 +203,8 @@ extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFrame) {
     unsafe {
         PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
     }
+    // EXPERIMENT: unconditional LAPIC eoi
+    crate::apic::eoi();
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_frame: InterruptStackFrame) {
@@ -204,6 +215,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_frame: InterruptStackFrame
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
     }
+    crate::apic::eoi();
 }
 
 fn exception(name: &str, frame: &InterruptStackFrame) -> ! {
