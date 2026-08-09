@@ -44,19 +44,27 @@ pub fn rearm() {
     unsafe {
         PICS.lock().initialize();
     }
-    let mut cmd = Port::new(0x43);
-    let mut data = Port::new(0x40);
-    unsafe {
-        cmd.write(0x34u8);
-        data.write(0x00u8);
-        data.write(0x00u8);
-    }
+    pic_unmask_all();
+    pit_set_rate(PIT_DIVISOR_1000HZ);
     x86_64::instructions::interrupts::enable();
     TICKS.store(0, Ordering::Relaxed);
 }
 
+/// PIT divisor for a ~1 kHz tick (1.1931816 MHz / 1193).
+const PIT_DIVISOR_1000HZ: u16 = 1193;
+
+fn pit_set_rate(divisor: u16) {
+    let mut cmd = Port::<u8>::new(0x43);
+    let mut data = Port::<u8>::new(0x40);
+    unsafe {
+        cmd.write(0x34u8); // channel 0, lobyte/hibyte, mode 2 (rate generator)
+        data.write((divisor & 0xFF) as u8);
+        data.write((divisor >> 8) as u8);
+    }
+}
+
 pub fn sleep_ms(ms: u64) {
-    let target = ticks() + ms.div_ceil(55).max(1);
+    let target = ticks() + ms.max(1);
     while ticks() < target {
         x86_64::instructions::interrupts::enable_and_hlt();
     }
@@ -135,7 +143,18 @@ pub fn init() {
     unsafe {
         PICS.lock().initialize();
     }
+    pic_unmask_all();
+    pit_set_rate(PIT_DIVISOR_1000HZ);
     x86_64::instructions::interrupts::enable();
+}
+
+fn pic_unmask_all() {
+    unsafe {
+        let mut pic0 = Port::<u8>::new(0x21);
+        let mut pic1 = Port::<u8>::new(0xA1);
+        pic0.write(0x00);
+        pic1.write(0x00);
+    }
 }
 
 extern "x86-interrupt" fn divide_error_handler(frame: InterruptStackFrame) {

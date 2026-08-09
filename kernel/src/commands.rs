@@ -367,7 +367,7 @@ fn cmd_solarfetch() {
     about_row(2, "OS", format_args!("{} {} x86_64", OS_NAME, OS_VERSION));
     about_row(3, "Kernel", format_args!("{} {}", crate::KERNEL_NAME, crate::KERNEL_VERSION));
 
-    let secs = interrupts::ticks() * 55 / 1000;
+    let secs = interrupts::ticks() / 1000;
     if secs >= 3600 {
         about_row(4, "Uptime", format_args!("{}h {}m", secs / 3600, (secs % 3600) / 60));
     } else if secs >= 60 {
@@ -490,7 +490,7 @@ fn cmd_color(arg: &[char]) {
 }
 
 fn cmd_status() {
-    let uptime_secs = interrupts::ticks() / 100;
+    let uptime_secs = interrupts::ticks() / 1000;
     println!("System status:");
     println!("  {:<14}: {} seconds", "Uptime", uptime_secs);
     if let Some(info) = framebuffer::info() {

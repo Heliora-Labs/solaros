@@ -11,7 +11,8 @@
 
 ## Faz 1 — Gerçek donanım boot + girdi
 - [x] 1a: i8042 proper init (controller test, port enable/devre, timeout'lar, USB legacy emu disable) — `kernel/src/ps2.rs`; QEMU E2E: xlate+set1, IRQ1, help komutu kanıtlı; USB legacy 1e/ACPI'ye devredildi
-- [ ] 1b: UEFI imajı QEMU'da ilk test (solaros-uefi.img; Secure Boot kapalı)
+- [x] 1b: UEFI imajı QEMU'da ilk test (solaros-uefi.img; Secure Boot kapalı) — OVMF prebuilt ile tam boot + shell + klavye E2E; BIOS regresyonu `status` (uptime s) ile doğrulandı
+  - Gerekli düzeltmeler (kernel `interrupts.rs`): `pic_unmask_all()` (OVMF maskeli IRQ bırakıyor; BIOS'ta maskesiz), PIT 1kHz self-arm (`pit_set_rate`, 0x43/0x40), `sleep_ms` artık tick=ms tabanlı; uptime saniye hesabı `/1000`. BIOS'un PIT'i arm etmesine güven yok — kernel kendisi kuruyor.
 - [ ] 1c: Gerçek makinede ilk boot denemesi (UEFI imaj -> USB; ekran/serial debug döngüsü)
 - [ ] 1d: XHCI driver (USB klavye, EHCI fallback)
 - [ ] 1e: ACPI RSDP/RSDT + MADT parse; IOAPIC + LAPIC init; IRQ override'ları (IRQ0->IRQ2, klavye polarite); PIC kapatma
@@ -44,5 +45,5 @@
 - PIO ATA + PS/2 klavye dışında donanım desteği yok (AHCI/XHCI/NVMe gerekli)
 - Tek çekirdek; PIC tabanlı kesintiler (APIC/IOAPIC yok)
 - Veri diski tavanı: 128GiB (LBA28, 1024 grup); tüm ham disk ext4 olarak biçimlenir (partition parse yok)
-- UEFI imajı üretiliyor ama test edilmedi; Secure Boot imzasız önyükleyiciyi engeller
+- UEFI imajı OVMF/QEMU'da boot ediyor (kernel taraf); gerçek makine + Secure Boot henüz denenmedi (imzasız önyükleyici engeller)
 - Saat yok (uptime yalnızca PIT ticks)
