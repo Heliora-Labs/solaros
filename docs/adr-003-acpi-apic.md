@@ -26,4 +26,4 @@
 
 - BIOS (TCG, -smp 4): 2G/4CPU, prompt ~8s, key E2E çalışıyor; UEFI/OVMF benzeri çalışıyor (52s).
 - `[ OK ] APIC: ... IRQ0 -> GSI2 (PIT), IRQ1 -> GSI1 (kbd); PIC masked`
-- 1f (LAPIC timer kalibrasyon) sıradaki aday; PIT fallback duruyor.
+- 1f (LAPIC timer kalibrasyon): `timer_init()` — maskeli LVT ile 10/100ms PIT-ölçümlü kalibrasyon (sarma korumalı), sonra periyodik 1ms vektör 32 + PIT GSI2 IOAPIC mask. Aynı vektör/handler, TICKS değişmedi; PIT fallback korunur. BIOS ~1.16M tik/ms, UEFI ~1.27M tik/ms — TCG clock'a göre değişir, kalibrasyon zorunlu.

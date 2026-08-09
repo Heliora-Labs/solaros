@@ -54,6 +54,77 @@ pub fn eoi() {
     }
 }
 
+const LVT_TIMER: u64 = 0x320;
+const LAPIC_DIV_CONF: u64 = 0x3E0;
+const LAPIC_INIT_COUNT: u64 = 0x380;
+const LAPIC_CURR_COUNT: u64 = 0x390;
+
+const TIMER_PERIODIC: u32 = 0x20000;
+const TIMER_MASKED: u32 = 0x10000;
+const TIMER_VECTOR: u32 = 32;
+
+fn lapic_read(off: u64) -> u32 {
+    unsafe { core::ptr::read_volatile(lapic(off)) }
+}
+
+fn lapic_write(off: u64, value: u32) {
+    unsafe { core::ptr::write_volatile(lapic(off), value) }
+}
+
+fn ioapic_mask_pin(pin: u32) {
+    let reg = IOAPIC_REDIR + pin * 2;
+    let lo = ioapic_read(reg);
+    let hi = ioapic_read(reg + 1);
+    ioapic_write(reg, lo);
+    ioapic_write(reg + 1, hi | 0x0001_0000);
+}
+
+/// Calibrate the LAPIC timer against the PIT (still driving TICKS during
+/// calibration), then switch the 1 kHz tick source over to the LAPIC.
+/// Returns false only if calibration yields nothing usable (PIT fallback).
+pub fn timer_init() -> bool {
+    lapic_write(LVT_TIMER, TIMER_MASKED | TIMER_PERIODIC | TIMER_VECTOR);
+    lapic_write(LAPIC_DIV_CONF, 0b1011); // divide by 1
+
+    let u32_max = u32::MAX;
+    lapic_write(LAPIC_INIT_COUNT, u32_max);
+    crate::interrupts::sleep_ms(10);
+    let used10 = u32_max - lapic_read(LAPIC_CURR_COUNT);
+    if used10 == 0 || used10 as u64 >= i32::MAX as u64 {
+        return false;
+    }
+
+    lapic_write(LAPIC_INIT_COUNT, u32_max);
+    crate::interrupts::sleep_ms(100);
+    let used100 = u32_max - lapic_read(LAPIC_CURR_COUNT);
+    let per_ms = if (used100 as u64) < i32::MAX as u64 {
+        used100 / 100
+    } else {
+        used10 / 10
+    };
+    if per_ms == 0 {
+        return false;
+    }
+    boot::ok(format_args!(
+        "Timer: LAPIC calibration {} ticks/ms ({})",
+        per_ms,
+        if used100 < i32::MAX as u32 { "100ms" } else { "10ms" }
+    ));
+
+    let (gsi0, _) = gsi_of(0);
+    ioapic_mask_pin(gsi0);
+    boot::ok(format_args!("Timer: PIT pin GSI{} masked", gsi0));
+
+    lapic_write(LAPIC_DIV_CONF, 0b1011);
+    lapic_write(LAPIC_INIT_COUNT, per_ms);
+    lapic_write(LVT_TIMER, TIMER_PERIODIC | TIMER_VECTOR);
+    boot::ok(format_args!(
+        "Timer: LAPIC periodic 1ms vector {} active",
+        TIMER_VECTOR
+    ));
+    true
+}
+
 fn gsi_of(irq: u8) -> (u32, u16) {
     let e = STATE.lock().iso[irq as usize & 0xF];
     if e.1 == u16::MAX && e.0 == u32::MAX {

@@ -194,6 +194,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let acpi = acpi::init(boot_info);
     if let Some(a) = &acpi {
         let _ = apic::init(a);
+        if !apic::timer_init() {
+            boot::fail(format_args!("Timer: LAPIC calibration failed - PIT fallback"));
+        }
     }
 
     match fb_info {

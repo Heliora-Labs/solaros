@@ -19,7 +19,9 @@
   - `kernel/src/acpi.rs`: PMO penceresi (0xFFFF_8000_0000_0000) ile RSDP/RSDT/XSDT + `Acpi::find`; `BootloaderConfig.mappings.physical_memory` ile tüm fiziksel bellek kernel'e açıldı (bootloader sayfa tablosu high-kernel+fb dışını identity'siz bırakıyordu; 0x1004000 vb. problar fault -> kök neden fiziksel adreslerin eşlenmemiş olmasıydı)
   - `kernel/src/apic.rs`: MADT (0x2C'den başlayan kayıtlar — Length toplam tablo boyutu, header değil!), ISO override (IRQ0->GSI2), IOAPIC pin mask + PIT->vec32/klavye->vec33, LAPIC SVR enable, PIC full mask; handler'larda koşulsuz LAPIC EOI (0xFEE000B0 sabit adres, lock'suz — handler-init lock ölümcül: STATE.lock() içinde IRQ düşerdi, ~%50 silent stall)
   - BIOS (smp4, 8s boot) + UEFI/OVMF (52s) E2E: `[ OK ] APIC:` satırları + klavye "status" komutu -> uptime tıklıyor
-- [ ] 1f: LAPIC timer kalibrasyonu ve zamanlama altyapısı (PIT fallback)
+- [x] 1f: LAPIC timer kalibrasyonu ve zamanlama altyapısı (PIT fallback)
+  - `apic::timer_init()`: LVT timer maskeli kalibrasyon — 10ms+100ms PIT ölçümü (sarma korumalı, kısa süre verisi otomatik), periyodik 1ms vektör 32 kurulumu, ardından PIT pinini IOAPIC'te maskeler (sırasız IRQ penceresi: önce PIT mask, sonra LVT aç). Aynı vektör+handler olduğundan TICKS/sleep_ms/uptime değişmedi; kalibrasyon başarısızsa PIT fallback + FAIL logu.
+  - BIOS: 1.157.848 tik/ms; UEFI: 1.265.067 tik/ms; ikisinde prompt + "status" -> uptime tıklıyor
 
 ## Faz 2 — Bellek + süreçler
 - [ ] 2a: Heap allocator + global allocator + alloc crate (statik buffer'lardan kademeli geçiş)
