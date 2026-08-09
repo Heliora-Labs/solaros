@@ -24,7 +24,10 @@
   - BIOS: 1.157.848 tik/ms; UEFI: 1.265.067 tik/ms; ikisinde prompt + "status" -> uptime tıklıyor
 
 ## Faz 2 — Bellek + süreçler
-- [ ] 2a: Heap allocator + global allocator + alloc crate (statik buffer'lardan kademeli geçiş)
+- [x] 2a: Heap allocator + global allocator + alloc crate (statik buffer'lardan kademeli geçiş)
+  - `kernel/src/heap.rs`: first-fit free-list allocator (split+aligned rest, header-her-blok, dealloc deterministik — align_up(16, layout.align()) aynı fonksiyon), 16MB heap en büyük Usable bölgenin SON 16MB'ından (bootloader memory map, PMO penceresinde)
+  - Düzeltilen panik: split'te rest adresi align değildi (String gibi tek boyutlu isteklerde total 16-mult olmuyor) → rest align_up(...,16) + bloğu genişlet
+  - `history` komutu (Vec<String>, max 50, ardışık dup'ları atlar) — heap'in gerçek kullanımı; BIOS+UEFI E2E: selftest sum 6290432 ok, history listeler
 - [ ] 2b: Preemptive scheduler (timer -> context switch, idle task, lock disiplinleri)
 - [ ] 2c: User mode: GDT user seg + TSS/IST, syscall/sysret MSR'ları (STAR/LSTAR/FMASK)
 - [ ] 2d: ELF64 statik yükleyici + minimal syscall seti (read/write/exit...) + ilk userspace program

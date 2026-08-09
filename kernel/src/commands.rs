@@ -7,11 +7,16 @@ use crate::settings;
 use crate::settings::KbdLayout;
 use crate::OS_NAME;
 use crate::OS_VERSION;
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::fmt;
 use spin::Mutex;
 
 const MAX_ARGS: usize = 8;
 const MAX_ARG_LEN: usize = 64;
+const HISTORY_MAX: usize = 50;
+
+static HISTORY: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 struct Command {
     name: &'static str,
@@ -62,6 +67,10 @@ const COMMANDS: &[Command] = &[
     Command {
         name: "wtest",
         desc: "writes a pattern file and verifies it: wtest <path> <size> | verify",
+    },
+    Command {
+        name: "history",
+        desc: "lists recently executed commands (heap-backed)",
     },
     Command {
         name: "diskinfo",
@@ -197,6 +206,18 @@ pub fn execute(chars: &[char]) {
     }
     let name = &args[0..lens[0]];
 
+    if !matches(name, "history") {
+        let line: String = chars.iter().collect();
+        let mut h = HISTORY.lock();
+        let dup = h.last().is_some_and(|l| l == &line);
+        if !dup {
+            h.push(line);
+            if h.len() > HISTORY_MAX {
+                h.remove(0);
+            }
+        }
+    }
+
     let arg_str = |i: usize| -> &[char] {
         if i < count {
             &args[i * MAX_ARG_LEN..i * MAX_ARG_LEN + lens[i]]
@@ -223,6 +244,8 @@ pub fn execute(chars: &[char]) {
         cmd_status();
     } else if matches(name, "loadkeys") {
         cmd_loadkeys(arg_str(1));
+    } else if matches(name, "history") {
+        cmd_history();
     } else if matches(name, "help2") {
         println!("Hidden command found! More is coming here in the future.");
     } else if matches(name, "diskinfo") {
@@ -267,6 +290,17 @@ pub fn execute(chars: &[char]) {
             "Unknown command: '{}'. Type 'help' for a list of commands.",
             crate::Utf8Chars(&s[..n])
         );
+    }
+}
+
+fn cmd_history() {
+    let h = HISTORY.lock();
+    if h.is_empty() {
+        println!("History is empty.");
+        return;
+    }
+    for (i, s) in h.iter().enumerate() {
+        println!("{:4}  {}", i + 1, s);
     }
 }
 

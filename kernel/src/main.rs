@@ -2,6 +2,8 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 
+extern crate alloc;
+
 mod ata;
 mod boot;
 mod acpi;
@@ -12,6 +14,7 @@ mod ext4;
 mod fat;
 mod framebuffer;
 mod fs;
+mod heap;
 mod interrupts;
 mod keyboard;
 mod ps2;
@@ -247,6 +250,13 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             r.kind,
             (r.end - r.start) / 1024
         ));
+    }
+
+    interrupts::sleep_ms(70);
+    if heap::init(boot_info) {
+        heap::selftest();
+    } else {
+        boot::fail(format_args!("Heap: no usable region for 16MB heap"));
     }
 
     interrupts::sleep_ms(70);
