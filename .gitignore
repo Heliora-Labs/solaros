@@ -1,3 +1,4 @@
 target/
 disk.img
 *.img
+run-qemu.ps1
