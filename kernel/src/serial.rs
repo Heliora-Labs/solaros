@@ -7,6 +7,8 @@ use uart_16550::spec::registers::IER;
 use uart_16550::Config;
 use uart_16550::Uart16550Tty;
 
+use x86_64::instructions::interrupts::without_interrupts;
+
 static SERIAL1: Mutex<Option<Uart16550Tty<PioBackend>>> = Mutex::new(None);
 
 pub fn init() {
@@ -21,8 +23,10 @@ pub fn init() {
 
 #[doc(hidden)]
 pub fn write_fmt(args: fmt::Arguments) {
-    let mut serial = SERIAL1.lock();
-    if let Some(s) = serial.as_mut() {
-        let _ = s.write_fmt(args);
-    }
+    without_interrupts(|| {
+        let mut serial = SERIAL1.lock();
+        if let Some(s) = serial.as_mut() {
+            let _ = s.write_fmt(args);
+        }
+    });
 }

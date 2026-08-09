@@ -65,8 +65,12 @@ fn pit_set_rate(divisor: u16) {
 
 pub fn sleep_ms(ms: u64) {
     let target = ticks() + ms.max(1);
-    while ticks() < target {
-        x86_64::instructions::interrupts::enable_and_hlt();
+    if crate::sched::active() {
+        crate::sched::sleep_until(target);
+    } else {
+        while ticks() < target {
+            x86_64::instructions::interrupts::enable_and_hlt();
+        }
     }
 }
 
@@ -203,8 +207,8 @@ extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFrame) {
     unsafe {
         PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
     }
-    // EXPERIMENT: unconditional LAPIC eoi
     crate::apic::eoi();
+    crate::sched::schedule();
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_frame: InterruptStackFrame) {
@@ -219,6 +223,16 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_frame: InterruptStackFrame
 }
 
 fn exception(name: &str, frame: &InterruptStackFrame) -> ! {
+    crate::serial::write_fmt(format_args!(
+        "[EXC] {} RIP={:#x} CS={:#x} RSP={:#x} CR2={:#x}\n",
+        name,
+        frame.instruction_pointer.as_u64(),
+        frame.code_segment.0,
+        frame.stack_pointer.as_u64(),
+        x86_64::registers::control::Cr2::read()
+            .map(|a| a.as_u64())
+            .unwrap_or(0)
+    ));
     use crate::println;
     println!();
     println!("==================================================");

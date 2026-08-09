@@ -2,6 +2,8 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::ptr;
 use spin::Mutex;
 
+use x86_64::instructions::interrupts::without_interrupts;
+
 use crate::acpi::PMO;
 
 const BLOCK_HEADER: usize = core::mem::size_of::<FreeBlock>();
@@ -71,6 +73,51 @@ impl HeapAllocator {
 
 unsafe impl GlobalAlloc for HeapAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        self.alloc_inner(layout)
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe {
+            without_interrupts(|| {
+                let mut inner = self.lock.lock();
+                if ptr.is_null() {
+                    return;
+                }
+                let off = align_up(BLOCK_HEADER, layout.align());
+                let block = (ptr as usize - off) as *mut FreeBlock;
+                let size = (*block).size;
+                let head = inner.free;
+                inner.free = block;
+                (*block).next = head;
+                inner.used = inner.used.saturating_sub(size);
+                inner.frees += 1;
+            });
+        }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        unsafe {
+            without_interrupts(|| {
+                let new_ptr =
+                    self.alloc(Layout::from_size_align_unchecked(new_size, layout.align()));
+                if new_ptr.is_null() {
+                    return ptr::null_mut();
+                }
+                let copy = core::cmp::min(layout.size(), new_size);
+                ptr::copy_nonoverlapping(ptr, new_ptr, copy);
+                self.dealloc(ptr, layout);
+                new_ptr
+            })
+        }
+    }
+}
+
+impl HeapAllocator {
+    fn alloc_inner(&self, layout: Layout) -> *mut u8 {
+        without_interrupts(|| self.alloc_locked(layout))
+    }
+
+    fn alloc_locked(&self, layout: Layout) -> *mut u8 {
         unsafe {
             let mut inner = self.lock.lock();
             let off = align_up(BLOCK_HEADER, layout.align());
@@ -112,37 +159,6 @@ unsafe impl GlobalAlloc for HeapAllocator {
                 cur = b.next;
             }
             ptr::null_mut()
-        }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe {
-            let mut inner = self.lock.lock();
-            if ptr.is_null() {
-                return;
-            }
-            let off = align_up(BLOCK_HEADER, layout.align());
-            let block = (ptr as usize - off) as *mut FreeBlock;
-            let size = (*block).size;
-            let head = inner.free;
-            inner.free = block;
-            (*block).next = head;
-            inner.used = inner.used.saturating_sub(size);
-            inner.frees += 1;
-        }
-    }
-
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        unsafe {
-            let new_ptr =
-                self.alloc(Layout::from_size_align_unchecked(new_size, layout.align()));
-            if new_ptr.is_null() {
-                return ptr::null_mut();
-            }
-            let copy = core::cmp::min(layout.size(), new_size);
-            ptr::copy_nonoverlapping(ptr, new_ptr, copy);
-            self.dealloc(ptr, layout);
-            new_ptr
         }
     }
 }

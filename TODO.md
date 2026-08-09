@@ -28,7 +28,10 @@
   - `kernel/src/heap.rs`: first-fit free-list allocator (split+aligned rest, header-her-blok, dealloc deterministik — align_up(16, layout.align()) aynı fonksiyon), 16MB heap en büyük Usable bölgenin SON 16MB'ından (bootloader memory map, PMO penceresinde)
   - Düzeltilen panik: split'te rest adresi align değildi (String gibi tek boyutlu isteklerde total 16-mult olmuyor) → rest align_up(...,16) + bloğu genişlet
   - `history` komutu (Vec<String>, max 50, ardışık dup'ları atlar) — heap'in gerçek kullanımı; BIOS+UEFI E2E: selftest sum 6290432 ok, history listeler
-- [ ] 2b: Preemptive scheduler (timer -> context switch, idle task, lock disiplinleri)
+- [x] 2b: Preemptive scheduler (timer -> context switch, idle task, lock disiplinleri)
+  - `kernel/src/sched.rs`: round-robin preemptive (1kHz LAPIC timer -> schedule()), 64KB heap task stack'leri, `sleep_until` (sleepers listesi + hlt + timer wake), `switches` sayacı; kernel boot stack'i 1MB -> 4MB (`kernel_stack_size`; debug build boot ~1MB yiyordu)
+  - Düzeltilen hatalar: (1) kilit disiplini — `SCHED`/`SERIAL1`/heap kilitleri IRQ-reentrancy'ye karşı `without_interrupts` içinde; hiçbir kilit `context_switch` boyunca tutulamaz (kilit switch'te asılı kalıyordu → sleep'te self-deadlock); (2) `sleep_until` çift `SCHED.lock()` (spin reentrant değil); (3) `context_switch` compiler prologue'u (debug build 0x18 spill) restore `ret`'ini kaydırıyordu → `global_asm!` ile prologue'suz simetrik frame; (4) kernel boot stack taşması (saved_rsp stack tabanının altına düşüyordu → restore'da garaj adresine INSTRUCTION_FETCH PF)
+  - BIOS + UEFI/OVMF E2E: `[blinky-a] Ns` her saniye + `[demo-count]` akıyor, terminal prompt canlı, panic yok
 - [ ] 2c: User mode: GDT user seg + TSS/IST, syscall/sysret MSR'ları (STAR/LSTAR/FMASK)
 - [ ] 2d: ELF64 statik yükleyici + minimal syscall seti (read/write/exit...) + ilk userspace program
 - [ ] 2e: Shell'i userspace'e taşıma (init + terminal process)

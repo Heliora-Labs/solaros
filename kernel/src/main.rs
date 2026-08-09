@@ -18,6 +18,7 @@ mod heap;
 mod interrupts;
 mod keyboard;
 mod ps2;
+mod sched;
 mod serial;
 mod settings;
 mod terminal;
@@ -323,6 +324,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     boot::ok(format_args!("Terminal ready"));
     interrupts::sleep_ms(250);
 
+    sched::init();
+    sched::spawn("blinky-a", demo_blinky_a);
+    sched::spawn("demo-count", demo_count);
+
     framebuffer::clear();
     println!();
     framebuffer::set_colors(framebuffer::ACCENT, framebuffer::BG);
@@ -333,10 +338,30 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     terminal::run();
 }
 
+fn demo_blinky_a() {
+    let mut n = 0u32;
+    loop {
+        crate::serial::write_fmt(format_args!("[blinky-a] {}s (switches {})\n", n, sched::switches()));
+        n += 1;
+        interrupts::sleep_ms(1000);
+    }
+}
+
+fn demo_count() {
+    let mut n = 0u64;
+    loop {
+        n += 1;
+        if n % 20 == 0 {
+            crate::serial::write_fmt(format_args!("[demo-count] {}\n", n));
+        }
+        interrupts::sleep_ms(10);
+    }
+}
+
 static BOOTLOADER_CONFIG: bootloader_api::BootloaderConfig = {
     use bootloader_api::config::Mapping;
     let mut c = bootloader_api::BootloaderConfig::new_default();
-    c.kernel_stack_size = 1024 * 1024;
+    c.kernel_stack_size = 4 * 1024 * 1024;
     c.mappings.physical_memory = Some(Mapping::FixedAddress(0xFFFF_8000_0000_0000));
     c
 };
