@@ -9,7 +9,7 @@ use x86_64::instructions::interrupts::without_interrupts;
 pub const CELL_W: usize = 8;
 pub const CELL_H: usize = 16;
 
-// Scrollback: en fazla 256 kolon (2048px) x 2000 satir. ~4MB bss.
+// Scrollback: at most 256 columns (2048px) x 2000 rows. ~4MB bss.
 const COLS_MAX: usize = 256;
 const SCR_ROWS: usize = 2000;
 
@@ -34,11 +34,11 @@ struct Console {
     info: Option<FrameBufferInfo>,
     fg: Rgb,
     bg: Rgb,
-    cols: usize,   // gorunen kolon sayisi (piksel/8)
-    vis: usize,    // gorunen satir sayisi (piksel/16)
+    cols: usize,   // visible column count (pixels/8)
+    vis: usize,    // visible row count (pixels/16)
     cells: [Cell; COLS_MAX * SCR_ROWS],
-    rows: usize,   // tampondaki toplam mantiksal satir (0 = bos)
-    view: usize,   // sondan geriye kac satir kaydirdik (0 = takip)
+    rows: usize,   // total logical rows in the buffer (0 = empty)
+    view: usize,   // rows scrolled back from the end (0 = follow)
     curs_col: usize,
 }
 
@@ -107,7 +107,7 @@ impl Console {
         }
     }
 
-    // framebuffer'i bir satir yukari kaydir, en alt satiri sil.
+    // Shift the framebuffer up by one row, clearing the bottom row.
     fn scroll_px(&mut self) {
         let w = self.width();
         let h = self.height();
@@ -128,8 +128,8 @@ impl Console {
         }
     }
 
-    // en eski satiri atmadan once: tampondaki "rows" satirini
-    // [1..rows) -> [0..rows-1) tasi
+    // Before dropping the oldest row: shift the "rows" buffer rows
+    // [1..rows) -> [0..rows-1)
     fn drop_oldest(&mut self) {
         let stride = COLS_MAX;
         self.cells
@@ -140,7 +140,8 @@ impl Console {
         }
     }
 
-    // Yeni satira gec. Ekranin dibindeyken (view==0) tam ise ekrani 1 satir yukari kaydir.
+    // Move to a new row. When following the bottom (view==0) and the screen
+    // is full, scroll the display up by one row.
     fn new_line(&mut self) {
         if self.rows == 0 {
             self.rows = 1;
@@ -152,7 +153,7 @@ impl Console {
         if self.rows > SCR_ROWS {
             self.drop_oldest();
         }
-        // Yeniden kullanilan satirda eski karakter kuyruklari kalmasin.
+        // Keep stale character tails out of the reused row.
         let cols = self.scr_cols();
         let line_start = (self.rows - 1) * COLS_MAX;
         self.cells[line_start..line_start + cols].fill(EMPTY_CELL);
@@ -162,7 +163,7 @@ impl Console {
         }
     }
 
-    // Tampondan görünen satirlarin Başlangıç indeksi
+    // Start index of the visible rows in the buffer
     fn window_start(&self) -> usize {
         if self.rows == 0 {
             return 0;
@@ -194,7 +195,7 @@ impl Console {
         }
     }
 
-    // Imlecin ekrandaki satir/sutun konumu (view==0 ise anlamli)
+    // Cursor row/column on screen (meaningful when view==0)
     fn cursor_location(&self) -> (usize, usize) {
         if self.rows == 0 {
             return (self.curs_col.min(self.scr_cols().saturating_sub(1)), 0);
@@ -215,7 +216,7 @@ impl Console {
     }
 
     fn write_char(&mut self, c: char) {
-        // Scrollbackteyken herhangi bir tus girisi dipe dondurur.
+        // Any key input while scrolled back returns to the bottom.
         if self.view != 0 {
             self.view = 0;
             self.paint();
@@ -244,7 +245,7 @@ impl Console {
     }
 
     fn curs_line_bg(&mut self, sx: usize, sy: usize) {
-        // linede bir sonraki yazacak hücreyi temizle (kolaylik olsun)
+        // Clear the next cell on the line to be written (for convenience)
         if self.rows > 0 {
             let idx = (self.rows - 1) * COLS_MAX + sx;
             self.cells[idx] = EMPTY_CELL;

@@ -1,33 +1,36 @@
-# ADR-005: Preemptive scheduler (Faz 2/2b)
+# ADR-005: Preemptive scheduler (Phase 2/2b)
 
-**Tarih:** 2026-08-10 · **Durum:** Kabul edildi · **Bağlam:** TODO 2b
+**Date:** 2026-08-10 · **Status:** Accepted · **Context:** TODO 2b
 
-## Karar
+## Decision
 
-- Round-robin preemptive scheduler (`kernel/src/sched.rs`): 1kHz LAPIC timer IRQ (vec 32)
-  içinde `schedule()` — current task ready kuyruğunun sonuna, sıradaki Ready task seçilir,
-  `context_switch` ile geçilir. Task stack'leri heap'te (64KB, `Box<[u8]>`); task 0 = kernel
-  (boot yığını), asla uyumaz.
-- `sleep_until(target)`: task `Sleeping(target)` + `sleepers` listesi; timer handler uyananları
-  ready'ye alır; uyuyan task `enable_and_hlt()` ile bekler (busy-wait yok).
-- **Kilit disiplini (kritik):** `SCHED`/`SERIAL1`/heap kilitleri daima `without_interrupts`
-  içinde alınır (IRQ-reentrancy → spin deadlock); **hiçbir kilit `context_switch` boyunca
-  tutulamaz** — `schedule()` hedefi seçip `drop(s)` eder, switch öyle yapılır. Kilidi
-  switch boyunca tutmak: kilit kernel frame'inde asılı kalır, `sleep_until`'in kilidi sonsuz
-  spin yapar.
-- `context_switch` **`global_asm!`** ile (prologue'suz): normal Rust fn + `asm!` kullanımında
-  derleyici debug build'de 0x18'lık arg-spill prologue'u ekliyordu; `saved_rsp` frame'i
-  simetrik olsa da restore `ret`'i spill bölgesinden okuyordu (garaj adres → INSTRUCTION_FETCH
-  PF). `global_asm!` ile frame tam simetrik: 6 callee-saved push → `mov [rdi], rsp` →
-  `mov rsp, rsi` → 6 pop → `ret`. Yeni task frame'i spawn'da `[0×6, entry]` olarak kurulur.
-- Kernel boot stack'i 1MB → 4MB (`BootloaderConfig.kernel_stack_size`): debug build'de boot
-  (ps2/acpi/apic/disk/fat-ext4 probe) ~1MB yığına yaklaşıyordu; ilk preemption IRQ frame'i
-  stack tabanının altına iniyor, saved_rsp garaj belleğe işaret ediyordu.
-- `switches()` atomik sayaç (demo göstergesi); `MAX_TASKS=24`, spawn heap stack + frame.
+- Round-robin preemptive scheduler (`kernel/src/sched.rs`): `schedule()` runs inside the
+  1kHz LAPIC timer IRQ (vec 32) - the current task goes to the back of the ready queue, the
+  next Ready task is picked and switched to via `context_switch`. Task stacks live on the
+  heap (64KB, `Box<[u8]>`); task 0 is the kernel (boot stack) and never sleeps.
+- `sleep_until(target)`: task becomes `Sleeping(target)` + `sleepers` list; the timer
+  handler moves woken tasks back to ready; a sleeping task waits with `enable_and_hlt()`
+  (no busy-wait).
+- **Lock discipline (critical):** `SCHED`/`SERIAL1`/heap locks are always taken inside
+  `without_interrupts` (IRQ-reentrancy -> spin deadlock); **no lock may be held across
+  `context_switch`** - `schedule()` picks the target, `drop(s)`s the lock, and only then
+  switches. Holding the lock across a switch leaves it stuck in the kernel frame and
+  `sleep_until` spins on it forever.
+- `context_switch` is written in **`global_asm!`** (no prologue): with a normal Rust fn +
+  `asm!`, the compiler emitted a 0x18-byte argument-spill prologue in debug builds; even
+  with a symmetric `saved_rsp` frame, the restore `ret` read from the spill area (garbage
+  address -> INSTRUCTION_FETCH PF). With `global_asm!` the frame is fully symmetric:
+  6 callee-saved pushes -> `mov [rdi], rsp` -> `mov rsp, rsi` -> 6 pops -> `ret`. A new
+  task frame is set up at spawn as `[0x6, entry]`.
+- Kernel boot stack 1MB -> 4MB (`BootloaderConfig.kernel_stack_size`): in debug builds the
+  boot (ps2/acpi/apic/disk/fat-ext4 probe) used to approach ~1MB; the first preemption IRQ
+  frame sank below the stack base and `saved_rsp` pointed at garbage memory.
+- `switches()` atomic counter (demo indicator); `MAX_TASKS=24`, spawn allocates heap stack
+  + frame.
 
-## Sonuç
+## Result
 
-- BIOS + UEFI/OVMF E2E: `[blinky-a] 0s/1s/2s/...` her saniye (sleep+preempt), `[demo-count]`
-  akıyor, kernel main switch'ler arasında sorunsuz devam ediyor (terminal prompt canlı),
-  panic yok. Sabitlenen hatalar: lock-across-switch deadlock, `sleep_until` çift lock,
-  context_switch prologue kayması, boot stack taşması.
+- BIOS + UEFI/OVMF E2E: `[blinky-a] 0s/1s/2s/...` every second (sleep+preempt),
+  `[demo-count]` streams, kernel main continues cleanly between switches (live terminal
+  prompt), no panics. Fixed bugs: lock-across-switch deadlock, `sleep_until` double lock,
+  context_switch prologue shift, boot stack overflow.

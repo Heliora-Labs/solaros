@@ -1,5 +1,5 @@
-﻿// VGA 8x16 fontu - Linux cekirdek lib/fonts/font_8x16.c verisi (GPL-2.0)
-// Konvansiyon: bit7 (MSB) = en soldaki piksel; 0. satir = en ust.
+﻿// VGA 8x16 font - data from the Linux kernel lib/fonts/font_8x16.c (GPL-2.0)
+// Convention: bit7 (MSB) = leftmost pixel; row 0 = top.
 
 pub const GLYPHS: [[u8; 16]; 256] = [
     /* 00 */ [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
@@ -298,9 +298,9 @@ pub fn get(c: char) -> Option<&'static [u8; 16]> {
 
 pub const BLOCK: &[u8; 16] = &GLYPHS[0xDB];
 
-// Braille (U+2800 - U+28FF): 8 nokta, 2x4 grid.
-// Nokta bitleri: bit0=1, bit1=2, bit2=3, bit3=4 (sol sütun), bit4=5, bit5=6, bit6=7, bit7=8 (sağ sütun).
-// 8x16 hücre: sol sütun x0-1, sağ sütun x5-6; satırlar 4px aralıkla, 3px nokta + 1px boşluk.
+// Braille (U+2800 - U+28FF): 8 dots, 2x4 grid.
+// Dot bits: bit0=1, bit1=2, bit2=3, bit3=4 (left column), bit4=5, bit5=6, bit6=7, bit7=8 (right column).
+// 8x16 cell: left column x0-1, right column x5-6; rows 4px apart, 3px dot + 1px gap.
 const fn braille_glyph(b: u8) -> [u8; 16] {
     let mut g = [0u8; 16];
     let mut r = 0;
