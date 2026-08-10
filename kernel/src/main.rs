@@ -14,13 +14,16 @@ mod ext4;
 mod fat;
 mod framebuffer;
 mod fs;
+mod gdt;
 mod heap;
 mod interrupts;
 mod keyboard;
+mod mem;
 mod ps2;
 mod sched;
 mod serial;
 mod settings;
+mod syscall;
 mod terminal;
 mod users;
 mod vga_font;
@@ -192,6 +195,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         ));
     }
 
+    gdt::init();
+    boot::ok(format_args!("GDT: kernel/user segments + TSS/IST (rsp0, ist0) loaded"));
+    syscall::init();
+    boot::ok(format_args!("Syscall: SYSCALL/SYSRET armed (STAR, LSTAR, SFMASK)"));
+
     interrupts::init();
     interrupts::sleep_ms(120);
 
@@ -327,6 +335,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     sched::init();
     sched::spawn("blinky-a", demo_blinky_a);
     sched::spawn("demo-count", demo_count);
+    sched::spawn("demo-user", demo_user);
 
     framebuffer::clear();
     println!();
@@ -356,6 +365,60 @@ fn demo_count() {
         }
         interrupts::sleep_ms(10);
     }
+}
+
+/// Hand-assembled ring 3 test program. Loops: ping syscall (rax=1) 5 times
+/// with a busy-wait delay, then exit syscall (rax=2). Never touches the
+/// stack (no push/call), so it needs no data page besides its own code.
+/// Offsets (used by the relative jumps):
+///   0x00 xor rbx, rbx       0x0C mov rax, 1     0x13 syscall
+///   0x15 inc rbx            0x18 cmp rbx, 5     0x1C jne +9 -> 0x27
+///   0x1E mov rax, 2         0x25 syscall        0x27 mov rcx, 0x2000000
+///   0x31 dec rcx            0x34 jnz -5 -> 0x31  0x36 jmp -0x2C -> 0x0C
+const USER_BLOB: &[u8] = &[
+    0x31, 0xdb, // xor rbx, rbx
+    0x48, 0xbf, 0xad, 0xde, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rdi, 0xDEAD
+    0x48, 0xc7, 0xc0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1
+    0x0f, 0x05, // syscall (ping)
+    0x48, 0xff, 0xc3, // inc rbx
+    0x48, 0x83, 0xfb, 0x05, // cmp rbx, 5
+    0x75, 0x09, // jne +9 (skip exit, to delay)
+    0x48, 0xc7, 0xc0, 0x02, 0x00, 0x00, 0x00, // mov rax, 2
+    0x0f, 0x05, // syscall (exit)
+    0x48, 0xb9, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, // mov rcx, 0x2000000
+    0x48, 0xff, 0xc9, // dec rcx
+    0x75, 0xfb, // jnz -5 (back to dec rcx at 0x31)
+    0xeb, 0xd4, // jmp -0x2C (loop)
+];
+
+fn demo_user() {
+    use core::alloc::{GlobalAlloc, Layout};
+
+    let code = unsafe {
+        crate::heap::ALLOCATOR.alloc(Layout::from_size_align_unchecked(0x2000, 0x1000))
+    } as usize;
+    let stack = unsafe {
+        crate::heap::ALLOCATOR.alloc(Layout::from_size_align_unchecked(0x10000, 0x1000))
+    } as usize;
+    if code == 0 || stack == 0 {
+        crate::serial::write_fmt(format_args!("[user] page alloc failed\n"));
+        return;
+    }
+
+    crate::mem::mark_user_pages(code as u64, 0x2000);
+    crate::mem::mark_user_pages(stack as u64, 0x10000);
+    unsafe {
+        core::ptr::copy_nonoverlapping(USER_BLOB.as_ptr(), code as *mut u8, USER_BLOB.len());
+    }
+    crate::serial::write_fmt(format_args!(
+        "[user] ring-3 blob @ {:#x}, user stack @ {:#x}\n",
+        code, stack
+    ));
+    crate::serial::write_fmt(format_args!(
+        "[user] entering ring 3 (5 pings, then exit)\n"
+    ));
+
+    crate::gdt::enter_user_mode(code as u64, (stack + 0x10000) as u64);
 }
 
 static BOOTLOADER_CONFIG: bootloader_api::BootloaderConfig = {

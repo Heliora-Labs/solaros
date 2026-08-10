@@ -15,6 +15,7 @@ const MAX_TASKS: usize = 24;
 enum TaskState {
     Ready,
     Sleeping(u64),
+    Dead,
 }
 
 struct Task {
@@ -25,6 +26,7 @@ struct Task {
     stack: Option<Box<[u8]>>,
     state: TaskState,
     switches: u64,
+    kstack_top: u64,
 }
 
 struct SchedulerInner {
@@ -60,6 +62,7 @@ pub fn init() {
             stack: None,
             state: TaskState::Ready,
             switches: 0,
+            kstack_top: crate::gdt::boot_stack_top(),
         });
         s.ready.push_back(0);
         INIT_DONE.store(true, Ordering::Release);
@@ -90,6 +93,7 @@ pub fn spawn(name: &'static str, entry: fn()) -> u32 {
             stack: Some(stack),
             state: TaskState::Ready,
             switches: 0,
+            kstack_top: top as u64,
         });
         s.ready.push_back(id);
         id
@@ -133,10 +137,12 @@ pub fn schedule() {
         let mut i = 0;
         while i < s.sleepers.len() {
             if s.sleepers[i].1 <= now {
-                let (id, _) = s.sleepers[i];
+                let (id, target) = s.sleepers[i];
                 s.sleepers.swap_remove(i);
-                s.tasks[id as usize].state = TaskState::Ready;
-                s.ready.push_back(id);
+                if s.tasks[id as usize].state == TaskState::Sleeping(target) {
+                    s.tasks[id as usize].state = TaskState::Ready;
+                    s.ready.push_back(id);
+                }
             } else {
                 i += 1;
             }
@@ -162,6 +168,11 @@ pub fn schedule() {
                 TASK_SWITCHES.fetch_add(1, Ordering::Relaxed);
                 s.tasks[cur as usize].switches += 1;
                 s.tasks[id as usize].switches += 1;
+                // The CPU reads TSS.rsp0 (and the syscall entry reads its own
+                // copy) when the next task is interrupted from ring 3, so both
+                // must point at the next task's kernel stack top.
+                crate::gdt::set_rsp0(s.tasks[id as usize].kstack_top);
+                crate::syscall::set_kstack_top(s.tasks[id as usize].kstack_top);
                 s.tasks[id as usize].saved_rsp
             }
             None => 0,
@@ -191,4 +202,50 @@ pub fn sleep_until(target: u64) {
             break;
         }
     }
+}
+
+/// Marks the current task dead and switches to the next ready task. The dead
+/// task's stack and kernel stack slot are never resumed. Called from the
+/// syscall exit path.
+pub fn terminate_current() -> ! {
+    without_interrupts(|| {
+        let mut s = SCHED.lock();
+        let cur = s.current;
+        crate::serial::write_fmt(format_args!(
+            "[sched] task {} '{}' terminated\n",
+            cur, s.tasks[cur as usize].name
+        ));
+        s.tasks[cur as usize].state = TaskState::Dead;
+
+        let next_rsp;
+        loop {
+            match s.ready.pop_front() {
+                Some(id) => {
+                    if id == cur || s.tasks[id as usize].state != TaskState::Ready {
+                        continue;
+                    }
+                    s.current = id;
+                    TASK_SWITCHES.fetch_add(1, Ordering::Relaxed);
+                    crate::gdt::set_rsp0(s.tasks[id as usize].kstack_top);
+                    crate::syscall::set_kstack_top(s.tasks[id as usize].kstack_top);
+                    next_rsp = s.tasks[id as usize].saved_rsp;
+                    break;
+                }
+                None => {
+                    crate::println!("No runnable task after termination - halting");
+                    drop(s);
+                    loop {
+                        x86_64::instructions::hlt();
+                    }
+                }
+            }
+        }
+        drop(s);
+        let mut dummy: usize = 0;
+        unsafe {
+            context_switch(&mut dummy, next_rsp);
+        }
+        unreachable!();
+    });
+    unreachable!()
 }

@@ -4,7 +4,7 @@ use pic8259::ChainedPics;
 use spin::Mutex;
 use x86_64::instructions::hlt;
 use x86_64::instructions::port::Port;
-use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
+use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -113,10 +113,27 @@ static IDT: spin::LazyLock<InterruptDescriptorTable> = spin::LazyLock::new(|| {
     idt.divide_error.set_handler_fn(divide_error_handler);
     idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
     idt.breakpoint.set_handler_fn(breakpoint_handler);
-    idt.page_fault.set_handler_fn(page_fault_handler);
-    idt.general_protection_fault
-        .set_handler_fn(general_protection_handler);
-    idt.double_fault.set_handler_fn(double_fault_handler);
+    // The error-code exceptions (#DF, #GP, #PF) use hand-written assembly
+    // trampolines: the LLVM x86-interrupt ABI with a second (error code)
+    // argument is broken on recent nightlies ("error: offset is not a
+    // multiple of 16", rust-lang/rust#139679).
+    unsafe {
+        idt.double_fault
+            .set_handler_addr(x86_64::VirtAddr::new(
+                double_fault_asm as unsafe extern "C" fn() as usize as u64,
+            ))
+            .set_stack_index(0);
+        idt.general_protection_fault
+            .set_handler_addr(x86_64::VirtAddr::new(
+                general_protection_asm as unsafe extern "C" fn() as usize as u64,
+            ))
+            .set_stack_index(0);
+        idt.page_fault
+            .set_handler_addr(x86_64::VirtAddr::new(
+                page_fault_asm as unsafe extern "C" fn() as usize as u64,
+            ))
+            .set_stack_index(0);
+    }
     idt[InterruptIndex::Timer.as_u8()].set_handler_fn(timer_interrupt_handler);
     idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
     for vec in 34u8..=47 {
@@ -171,35 +188,66 @@ pub fn pic_mask_all() {
 }
 
 extern "x86-interrupt" fn divide_error_handler(frame: InterruptStackFrame) {
-    exception("DIVIDE ERROR", &frame)
+    exception("DIVIDE ERROR", &frame, 0)
 }
 
 extern "x86-interrupt" fn invalid_opcode_handler(frame: InterruptStackFrame) {
-    exception("INVALID OPCODE", &frame)
+    exception("INVALID OPCODE", &frame, 0)
 }
 
 extern "x86-interrupt" fn breakpoint_handler(frame: InterruptStackFrame) {
-    exception("BREAKPOINT", &frame)
+    exception("BREAKPOINT", &frame, 0)
 }
 
-extern "x86-interrupt" fn page_fault_handler(frame: InterruptStackFrame, error: PageFaultErrorCode) {
+// --- Error-code exception trampolines -------------------------------------
+// The CPU pushes the error code on top of the interrupt frame; each
+// trampoline forwards (error_code, frame) to a plain extern "C" body.
+
+core::arch::global_asm!(
+    ".global double_fault_asm",
+    "double_fault_asm:",
+    "mov rdi, [rsp]",
+    "lea rsi, [rsp+8]",
+    "call double_fault_c",
+    "ud2",
+    ".global general_protection_asm",
+    "general_protection_asm:",
+    "mov rdi, [rsp]",
+    "lea rsi, [rsp+8]",
+    "call general_protection_c",
+    "ud2",
+    ".global page_fault_asm",
+    "page_fault_asm:",
+    "mov rdi, [rsp]",
+    "lea rsi, [rsp+8]",
+    "call page_fault_c",
+    "ud2"
+);
+
+unsafe extern "C" {
+    fn double_fault_asm();
+    fn general_protection_asm();
+    fn page_fault_asm();
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn double_fault_c(error: u64, frame: *const InterruptStackFrame) -> ! {
+    exception("DOUBLE FAULT", unsafe { &*frame }, error)
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn general_protection_c(error: u64, frame: *const InterruptStackFrame) -> ! {
+    exception("GENERAL PROTECTION FAULT", unsafe { &*frame }, error)
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn page_fault_c(error: u64, frame: *const InterruptStackFrame) -> ! {
+    let f = unsafe { &*frame };
     let addr = x86_64::registers::control::Cr2::read()
         .map(|a| a.as_u64())
         .unwrap_or(0);
-    crate::println!(
-        "  Faulting address: {:#x}  Error code: {:?}",
-        addr,
-        error
-    );
-    exception("PAGE FAULT", &frame)
-}
-
-extern "x86-interrupt" fn general_protection_handler(frame: InterruptStackFrame, _error: u64) {
-    exception("GENERAL PROTECTION FAULT", &frame)
-}
-
-extern "x86-interrupt" fn double_fault_handler(frame: InterruptStackFrame, _error: u64) -> ! {
-    exception("DOUBLE FAULT", &frame)
+    crate::println!("  Faulting address: {:#x}  Error code: {:#x}", addr, error);
+    exception("PAGE FAULT", f, error)
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(_frame: InterruptStackFrame) {
@@ -222,16 +270,17 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_frame: InterruptStackFrame
     crate::apic::eoi();
 }
 
-fn exception(name: &str, frame: &InterruptStackFrame) -> ! {
+fn exception(name: &str, frame: &InterruptStackFrame, error: u64) -> ! {
     crate::serial::write_fmt(format_args!(
-        "[EXC] {} RIP={:#x} CS={:#x} RSP={:#x} CR2={:#x}\n",
+        "[EXC] {} RIP={:#x} CS={:#x} RSP={:#x} CR2={:#x} ERR={:#x}\n",
         name,
         frame.instruction_pointer.as_u64(),
         frame.code_segment.0,
         frame.stack_pointer.as_u64(),
         x86_64::registers::control::Cr2::read()
             .map(|a| a.as_u64())
-            .unwrap_or(0)
+            .unwrap_or(0),
+        error
     ));
     use crate::println;
     println!();
@@ -241,6 +290,7 @@ fn exception(name: &str, frame: &InterruptStackFrame) -> ! {
     println!("  RIP: {:#x}", frame.instruction_pointer.as_u64());
     println!("  CS : {:#x}", frame.code_segment.0);
     println!("  RSP: {:#x}", frame.stack_pointer.as_u64());
+    println!("  ERR: {:#x}", error);
     println!("  System halted.");
     println!("==================================================");
     loop {
