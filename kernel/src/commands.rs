@@ -77,6 +77,10 @@ const COMMANDS: &[Command] = &[
         desc: "shows the detected ATA disks",
     },
     Command {
+        name: "pci",
+        desc: "lists PCI devices (config space enumeration)",
+    },
+    Command {
         name: "ls",
         desc: "lists files: ls [path]",
     },
@@ -250,6 +254,8 @@ pub fn execute(chars: &[char]) {
         println!("Hidden command found! More is coming here in the future.");
     } else if matches(name, "diskinfo") {
         cmd_diskinfo();
+    } else if matches(name, "pci") {
+        cmd_pci();
     } else if matches(name, "ls") {
         cmd_ls(arg_str(1));
     } else if matches(name, "cd") {
@@ -589,6 +595,10 @@ fn cmd_diskinfo() {
             println!("  Disk {} ({}:{}): not found", i, slot, pos);
         }
     }
+}
+
+fn cmd_pci() {
+    crate::pci::print_devices();
 }
 
 fn fs_err(cmd: &str, e: crate::fs::FsErr) {

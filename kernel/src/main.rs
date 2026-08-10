@@ -21,6 +21,7 @@ mod input;
 mod interrupts;
 mod keyboard;
 mod mem;
+mod pci;
 mod ps2;
 mod sched;
 mod serial;
@@ -308,6 +309,34 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     interrupts::sleep_ms(90);
     boot::ok(format_args!("Keyboard: {}", settings::layout_code()));
+
+    interrupts::sleep_ms(70);
+    pci::enumerate();
+    let pc = pci::device_count();
+    boot::ok(format_args!("PCI: {} devices found", pc));
+    for i in 0..pc {
+        if let Some(d) = pci::device(i) {
+            interrupts::sleep_ms(60);
+            let name = pci::device_name(&d);
+            if name.is_empty() {
+                boot::ok(format_args!(
+                    "  {:02x}:{:02x}.{}  {:04x}:{:04x}  {}",
+                    d.bus, d.dev, d.func, d.vendor, d.device, pci::class_name(&d)
+                ));
+            } else {
+                boot::ok(format_args!(
+                    "  {:02x}:{:02x}.{}  {:04x}:{:04x}  {:<16}  {}",
+                    d.bus,
+                    d.dev,
+                    d.func,
+                    d.vendor,
+                    d.device,
+                    pci::class_name(&d),
+                    name
+                ));
+            }
+        }
+    }
 
     interrupts::sleep_ms(90);
     users::init();

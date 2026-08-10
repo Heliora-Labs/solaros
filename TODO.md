@@ -51,7 +51,12 @@
   - BIOS + UEFI/OVMF E2E: help/echo/backspace-düzenleme/version/count/history(user-space)/whoami/solarfetch/xxbadcmd/color/passwd(maskeli)/login/ls/Ctrl-C/help2 — tümü çalışıyor, prompt her komuttan sonra yeniden basılıyor, blinky/demo-count kesintisiz, panic yok
 
 ## Faz 3 — Gerçek diskler
-- [ ] 3a: PCI enumeration (config space tarama) + cihaz listesi
+- [x] 3a: PCI enumeration (config space tarama) + cihaz listesi
+  - `kernel/src/pci.rs`: legacy PIO config space (0xCF8/0xCFC) ile tam enumerasyon — bus 0 + PCI-PCI bridge'lerin arkasındaki seconder bus'lar (header type 1, secondary bus 0x19; tespit edilen bus listesi, MAX_DEVICES=64)
+  - Cihaz başına vendor/device/class/subclass/progif/header_type/IRQ line okuma; class/subclass → okunur adlar (storage/IDE, bridge/Host, display/VGA, network, serialbus/USB...), QEMU bilinen cihaz tablosu (8086:1237 PIIX3 host, 7000 ISA, 7010 IDE, 1234:1111 VGA, 8086:100e e1000, VirtIO...)
+  - Boot'ta `[ OK ] PCI: 5 devices found` + her cihaz bir satır; `pci` komutu (exec köprüsüyle shell'den) tam liste basıyor; COMMANDS + user help'e eklendi
+  - ECAM (MCFG) bilinçli olarak yapılmadı — PIO, QEMU `pc` ve gerçek donanımda bus 0 için yeterli; gerçek çoklu root-port'ta (1c/3d) gerekecek
+  - BIOS + UEFI/OVMF E2E: boot satırları + `pci` komutu 5 cihazı aynı listeliyor, version/whoami regresyonu temiz, panic yok
 - [ ] 3b: AHCI driver (HBA init, command list, DMA, 48-bit LBA, read+write)
 - [ ] 3c: MBR/GPT bölümleme parse + veri bölümü mount (tüm ham diski ext4 biçimleme yerine)
 - [ ] 3d: NVMe driver (AHCI sonrası, opsiyonel)

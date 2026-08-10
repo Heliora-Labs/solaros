@@ -237,7 +237,7 @@ fn cmd_help() {
     puts("  history    - lists recently executed commands\n");
     puts("  version    - shows the SolarOS version\n");
     puts("  help2      - hidden command\n");
-    puts("Other commands (solarfetch, status, diskinfo, ls, cat, mkfs,\n");
+    puts("Other commands (solarfetch, status, diskinfo, pci, ls, cat, mkfs,\n");
     puts("whoami, users, adduser, passwd, login, su, loadkeys, wtest, ...)\n");
     puts("run in the kernel service via the exec syscall.\n");
 }
