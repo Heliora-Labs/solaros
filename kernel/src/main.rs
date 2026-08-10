@@ -10,6 +10,7 @@ mod acpi;
 mod apic;
 mod commands;
 mod crc;
+mod elf;
 mod ext4;
 mod fat;
 mod framebuffer;
@@ -367,58 +368,24 @@ fn demo_count() {
     }
 }
 
-/// Hand-assembled ring 3 test program. Loops: ping syscall (rax=1) 5 times
-/// with a busy-wait delay, then exit syscall (rax=2). Never touches the
-/// stack (no push/call), so it needs no data page besides its own code.
-/// Offsets (used by the relative jumps):
-///   0x00 xor rbx, rbx       0x0C mov rax, 1     0x13 syscall
-///   0x15 inc rbx            0x18 cmp rbx, 5     0x1C jne +9 -> 0x27
-///   0x1E mov rax, 2         0x25 syscall        0x27 mov rcx, 0x2000000
-///   0x31 dec rcx            0x34 jnz -5 -> 0x31  0x36 jmp -0x2C -> 0x0C
-const USER_BLOB: &[u8] = &[
-    0x31, 0xdb, // xor rbx, rbx
-    0x48, 0xbf, 0xad, 0xde, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mov rdi, 0xDEAD
-    0x48, 0xc7, 0xc0, 0x01, 0x00, 0x00, 0x00, // mov rax, 1
-    0x0f, 0x05, // syscall (ping)
-    0x48, 0xff, 0xc3, // inc rbx
-    0x48, 0x83, 0xfb, 0x05, // cmp rbx, 5
-    0x75, 0x09, // jne +9 (skip exit, to delay)
-    0x48, 0xc7, 0xc0, 0x02, 0x00, 0x00, 0x00, // mov rax, 2
-    0x0f, 0x05, // syscall (exit)
-    0x48, 0xb9, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, // mov rcx, 0x2000000
-    0x48, 0xff, 0xc9, // dec rcx
-    0x75, 0xfb, // jnz -5 (back to dec rcx at 0x31)
-    0xeb, 0xd4, // jmp -0x2C (loop)
-];
+/// The user program, compiled as a PIE ELF64 by the `user` crate (a
+/// build-dependency artifact) and embedded into the kernel image.
+static USER_ELF: &[u8] = include_bytes!(env!("USER_ELF"));
 
 fn demo_user() {
-    use core::alloc::{GlobalAlloc, Layout};
-
-    let code = unsafe {
-        crate::heap::ALLOCATOR.alloc(Layout::from_size_align_unchecked(0x2000, 0x1000))
-    } as usize;
-    let stack = unsafe {
-        crate::heap::ALLOCATOR.alloc(Layout::from_size_align_unchecked(0x10000, 0x1000))
-    } as usize;
-    if code == 0 || stack == 0 {
-        crate::serial::write_fmt(format_args!("[user] page alloc failed\n"));
-        return;
-    }
-
-    crate::mem::mark_user_pages(code as u64, 0x2000);
-    crate::mem::mark_user_pages(stack as u64, 0x10000);
-    unsafe {
-        core::ptr::copy_nonoverlapping(USER_BLOB.as_ptr(), code as *mut u8, USER_BLOB.len());
-    }
+    let prog = match elf::load_user_elf(USER_ELF) {
+        Some(p) => p,
+        None => {
+            crate::serial::write_fmt(format_args!("[user] ELF load failed\n"));
+            return;
+        }
+    };
     crate::serial::write_fmt(format_args!(
-        "[user] ring-3 blob @ {:#x}, user stack @ {:#x}\n",
-        code, stack
-    ));
-    crate::serial::write_fmt(format_args!(
-        "[user] entering ring 3 (5 pings, then exit)\n"
+        "[user] ELF ({} bytes) loaded, entering ring 3\n",
+        USER_ELF.len()
     ));
 
-    crate::gdt::enter_user_mode(code as u64, (stack + 0x10000) as u64);
+    crate::gdt::enter_user_mode(prog.entry, prog.stack_top);
 }
 
 static BOOTLOADER_CONFIG: bootloader_api::BootloaderConfig = {

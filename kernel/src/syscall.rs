@@ -83,6 +83,56 @@ extern "C" fn syscall_dispatch(frame: *mut SyscallFrame) -> u8 {
             crate::serial::write_fmt(format_args!("[user] bye (task exiting)\n"));
             1
         }
+        3 => {
+            let fd = f.rdi;
+            let buf = f.rsi;
+            let len = f.rdx;
+            if fd == 0 {
+                f.rax = u64::MAX;
+                return 0;
+            }
+            if buf == 0 || len == 0 {
+                f.rax = 0;
+                return 0;
+            }
+            let n = core::cmp::min(len, 256);
+            if !crate::mem::is_user_range(buf, n) {
+                crate::serial::write_fmt(format_args!(
+                    "[user] write: rejected range {:#x}+{}\n",
+                    buf, n
+                ));
+                f.rax = u64::MAX;
+                return 0;
+            }
+            let mut scratch = [0u8; 256];
+            unsafe {
+                core::ptr::copy_nonoverlapping(buf as *const u8, scratch.as_mut_ptr(), n as usize);
+            }
+            if let Ok(s) = core::str::from_utf8(&scratch[..n as usize]) {
+                crate::_print(format_args!("{}", s));
+            } else {
+                crate::serial::write_fmt(format_args!(
+                    "[user] write: non-UTF8 payload ({} bytes)\n",
+                    n
+                ));
+            }
+            f.rax = n;
+            0
+        }
+        4 => {
+            let _fd = f.rdi;
+            let buf = f.rsi;
+            let len = f.rdx;
+            if buf == 0
+                || len == 0
+                || !crate::mem::is_user_range(buf, core::cmp::min(len, 4096))
+            {
+                f.rax = u64::MAX;
+                return 0;
+            }
+            f.rax = 0;
+            0
+        }
         _ => {
             crate::serial::write_fmt(format_args!("[user] unknown syscall {}\n", f.rax));
             f.rax = u64::MAX;

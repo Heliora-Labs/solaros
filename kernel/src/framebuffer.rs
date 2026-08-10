@@ -4,6 +4,7 @@ use core::fmt::Write;
 use bootloader_api::info::FrameBufferInfo;
 use bootloader_api::info::PixelFormat;
 use spin::Mutex;
+use x86_64::instructions::interrupts::without_interrupts;
 
 pub const CELL_W: usize = 8;
 pub const CELL_H: usize = 16;
@@ -308,71 +309,93 @@ impl fmt::Write for Console {
 static CONSOLE: Mutex<Console> = Mutex::new(Console::empty());
 
 pub fn init(buffer: &'static mut [u8], info: FrameBufferInfo) {
-    let mut console = CONSOLE.lock();
-    console.buffer = Some(buffer);
-    console.info = Some(info);
-    console.cols = (info.width / CELL_W).clamp(1, COLS_MAX);
-    console.vis = (info.height / CELL_H).clamp(1, SCR_ROWS).min(SCR_ROWS);
-    console.clear_screen();
+    without_interrupts(|| {
+        let mut console = CONSOLE.lock();
+        console.buffer = Some(buffer);
+        console.info = Some(info);
+        console.cols = (info.width / CELL_W).clamp(1, COLS_MAX);
+        console.vis = (info.height / CELL_H).clamp(1, SCR_ROWS).min(SCR_ROWS);
+        console.clear_screen();
+    });
 }
 
 pub fn set_colors(fg: Rgb, bg: Rgb) {
-    let mut console = CONSOLE.lock();
-    console.fg = fg;
-    console.bg = bg;
+    without_interrupts(|| {
+        let mut console = CONSOLE.lock();
+        console.fg = fg;
+        console.bg = bg;
+    });
 }
 
 pub fn set_fg(fg: Rgb) {
-    CONSOLE.lock().fg = fg;
+    without_interrupts(|| {
+        CONSOLE.lock().fg = fg;
+    });
 }
 
 pub fn info() -> Option<FrameBufferInfo> {
-    CONSOLE.lock().info
+    without_interrupts(|| CONSOLE.lock().info)
 }
 
 pub fn backspace() {
-    CONSOLE.lock().backspace_at();
+    without_interrupts(|| {
+        CONSOLE.lock().backspace_at();
+    });
 }
 
 pub fn reset_colors() {
-    let mut console = CONSOLE.lock();
-    console.fg = FG;
-    console.bg = BG;
+    without_interrupts(|| {
+        let mut console = CONSOLE.lock();
+        console.fg = FG;
+        console.bg = BG;
+    });
 }
 
 pub fn clear() {
-    CONSOLE.lock().clear_screen();
+    without_interrupts(|| {
+        CONSOLE.lock().clear_screen();
+    });
 }
 
 // ---- TTY scrollback ----
 
 pub fn tty_page_up() {
-    let mut console = CONSOLE.lock();
-    let pg = console.vis;
-    console.view = (console.view + pg).min(console.rows.saturating_sub(console.vis));
-    console.paint();
+    without_interrupts(|| {
+        let mut console = CONSOLE.lock();
+        let pg = console.vis;
+        console.view = (console.view + pg).min(console.rows.saturating_sub(console.vis));
+        console.paint();
+    });
 }
 
 pub fn tty_page_down() {
-    let mut console = CONSOLE.lock();
-    console.view = console.view.saturating_sub(console.vis);
-    console.paint();
+    without_interrupts(|| {
+        let mut console = CONSOLE.lock();
+        console.view = console.view.saturating_sub(console.vis);
+        console.paint();
+    });
 }
 
 pub fn tty_home() {
-    let mut console = CONSOLE.lock();
-    console.view = console.rows.saturating_sub(console.vis);
-    console.paint();
+    without_interrupts(|| {
+        let mut console = CONSOLE.lock();
+        console.view = console.rows.saturating_sub(console.vis);
+        console.paint();
+    });
 }
 
 pub fn tty_end() {
-    let mut console = CONSOLE.lock();
-    console.view = 0;
-    console.paint();
+    without_interrupts(|| {
+        let mut console = CONSOLE.lock();
+        console.view = 0;
+        console.paint();
+    });
 }
 
 #[doc(hidden)]
 pub fn write_fmt(args: fmt::Arguments) {
-    let mut console = CONSOLE.lock();
-    let _ = console.write_fmt(args);
+    without_interrupts(|| {
+        let mut console = CONSOLE.lock();
+        let _ = console.write_fmt(args);
+    });
 }

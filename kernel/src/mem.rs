@@ -84,3 +84,72 @@ pub fn mark_user_pages(vaddr: u64, len: u64) -> bool {
     x86_64::instructions::tlb::flush_all();
     ok
 }
+
+/// Verifies that the page containing `vaddr` is present and user-accessible
+/// at every level of the page table walk. Unlike `mark_one_page` this never
+/// modifies the tables; used to validate user pointers in syscalls.
+fn check_one_page(vaddr: u64) -> bool {
+    let (root, _) = Cr3::read();
+    let root_va = phys_to_virt(root.start_address().as_u64());
+
+    let pml4_idx = ((vaddr >> 39) & 0x1FF) as usize;
+    let table = unsafe { &mut *(root_va as *mut PageTable) };
+    let pml4e = &mut table[PageTableIndex::new(pml4_idx as u16)];
+    if !pml4e
+        .flags()
+        .contains(PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE)
+    {
+        return false;
+    }
+
+    let pdpt_idx = ((vaddr >> 30) & 0x1FF) as usize;
+    let pdpt_va = phys_to_virt(pml4e.addr().as_u64());
+    let table = unsafe { &mut *(pdpt_va as *mut PageTable) };
+    let pdpte = &mut table[PageTableIndex::new(pdpt_idx as u16)];
+    if !pdpte
+        .flags()
+        .contains(PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE)
+    {
+        return false;
+    }
+    if pdpte.flags().contains(PageTableFlags::HUGE_PAGE) {
+        return true;
+    }
+
+    let pd_idx = ((vaddr >> 21) & 0x1FF) as usize;
+    let pd_va = phys_to_virt(pdpte.addr().as_u64());
+    let table = unsafe { &mut *(pd_va as *mut PageTable) };
+    let pde = &mut table[PageTableIndex::new(pd_idx as u16)];
+    if !pde
+        .flags()
+        .contains(PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE)
+    {
+        return false;
+    }
+    if pde.flags().contains(PageTableFlags::HUGE_PAGE) {
+        return true;
+    }
+
+    let pt_idx = ((vaddr >> 12) & 0x1FF) as usize;
+    let pt_va = phys_to_virt(pde.addr().as_u64());
+    let table = unsafe { &mut *(pt_va as *mut PageTable) };
+    let pte = &mut table[PageTableIndex::new(pt_idx as u16)];
+    pte.flags()
+        .contains(PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE)
+}
+
+/// True when every page in `[vaddr, vaddr + len)` is user-accessible in the
+/// current page tables. The kernel-side guard used by syscalls that copy data
+/// to or from user memory.
+pub fn is_user_range(vaddr: u64, len: u64) -> bool {
+    let start = vaddr & !(PAGE - 1);
+    let end = ((vaddr + len) + PAGE - 1) & !(PAGE - 1);
+    let mut page = start;
+    while page < end {
+        if !check_one_page(page) {
+            return false;
+        }
+        page += PAGE;
+    }
+    true
+}

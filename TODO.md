@@ -36,7 +36,12 @@
   - `kernel/src/gdt.rs`: user CS/DS segmentleri, TSS rsp0 + IST0 (DF_STACK), segment reload'lar, `enter_user_mode` (iretq frame — ring-3 data segment ön-yüklemesi CPL0'da #GP verir, long mode DS/ES/FS/GS RPL'i yok sayar → gerek yok); `kernel/src/syscall.rs`: STAR/LSTAR/SFMASK + `global_asm!` syscall entry (swapgs, frame push, dispatch, sysret; segment reload'lar rax'i eziyordu → kaldırıldı); `kernel/src/mem.rs`: `mark_user_pages` (walk'un HER seviyesine U biti — PML4E dahil; NX temizleme; sonrasında TLB flush)
   - Sabitlenen hatalar: (1) LLVM "offset is not a multiple of 16" build hatası — error-code argümanlı `extern "x86-interrupt"` handler'ları bu nightly'de bozuk (rust-lang/rust#139679) → #DF/#GP/#PF asm trampoline + `extern "C"` gövde + `set_handler_addr` (x86_64 crate'te `idt[8]` Index erişimi "entry is an exception with error code" panic'i verir → named field'lar); (2) `SYS_USER_RSP`/`DF_STACK` immutable static → `.rodata` → yazma #PF/#DF → `static mut`; (3) U-bit eksikliği → #PF e=0x15 (user fetch); (4) test blob'da jne/jnz displacement hataları (jnz dec'in ortasına düşüyordu → `leave` → NULL erişimi)
   - BIOS + UEFI/OVMF E2E: `[user] ping 1..5` + `bye` + `[sched] task 3 'demo-user' terminated`, blinky/demo-count kesintisiz, panic yok
-- [ ] 2d: ELF64 statik yükleyici + minimal syscall seti (read/write/exit...) + ilk userspace program
+- [x] 2d: ELF64 statik yükleyici + minimal syscall seti (read/write/exit...) + ilk userspace program
+  - `user/` crate: no_std + `-pie` + `-nostdlib` + özel linker.ld (taban 0xffff800010000000) ile ET_DYN ELF64; inline asm syscall trampoline (write=3, exit=2); build.rs + `[build-dependencies] user = { artifact = "bin" }` (bindeps) ile ELF kernel'e gömülü (`include_bytes!(env!("USER_ELF"))`)
+  - `kernel/src/elf.rs`: PIE loader — heap'ten PAGE-hizalı blok, `base = blok - min_vaddr`, segment kopyalama + bss sıfırlama, PT_DYNAMIC'ten DT_RELA ile 9× R_X86_64_RELATIVE uygulama, görüntü + 64KB stack `mark_user_pages`
+  - `kernel/src/syscall.rs`: write(3) — fd/len clamp 256 + `mem::is_user_range` guard + scratch kopya; read(4) stub; `kernel/src/mem.rs`: `is_user_range`/`check_one_page` (huge-page seviyelerini tanır)
+  - Sabitlenen hata: framebuffer `CONSOLE` kilidi kesmeler açıkken alınıyordu → timer IRQ kilitli kernel task'ı preempt edince tüm konsol yazımları spinlock'ta asılı kalıyordu → 12 çağrının tümü `without_interrupts` içine alındı (serial.rs zaten doğruydu)
+  - BIOS + UEFI/OVMF E2E: `[elf] loaded PIE` → `[user] hello from ELF (write syscall)` → 5× `loop iteration via write` → `bye` → `[sched] task 3 'demo-user' terminated`; blinky/demo-count/terminal prompt kesintisiz, panic yok
 - [ ] 2e: Shell'i userspace'e taşıma (init + terminal process)
 
 ## Faz 3 — Gerçek diskler
