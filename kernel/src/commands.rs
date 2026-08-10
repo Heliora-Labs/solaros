@@ -575,12 +575,23 @@ fn cmd_loadkeys(arg: &[char]) {
 }
 
 fn cmd_diskinfo() {
-    println!("ATA devices:");
+    println!("Storage devices:");
     for i in 0..crate::ata::MAX_DEVICES {
         let d = crate::ata::device(i);
-        let slot = if d.is_secondary { "secondary" } else { "primary" };
-        let pos = if d.master { "master" } else { "slave" };
-        if d.present {
+        if !d.present {
+            continue;
+        }
+        if d.via_ahci {
+            println!(
+                "  Disk {} ([AHCI]): {} MB, {} sectors, LBA48 - {}",
+                i,
+                d.capacity_mb,
+                d.sectors,
+                d.model_str()
+            );
+        } else {
+            let slot = if d.is_secondary { "secondary" } else { "primary" };
+            let pos = if d.master { "master" } else { "slave" };
             println!(
                 "  Disk {} ({}:{}): {} MB, {} sectors, LBA {} - {}",
                 i,
@@ -591,8 +602,6 @@ fn cmd_diskinfo() {
                 if d.lba_supported { "yes" } else { "no" },
                 d.model_str()
             );
-        } else {
-            println!("  Disk {} ({}:{}): not found", i, slot, pos);
         }
     }
 }

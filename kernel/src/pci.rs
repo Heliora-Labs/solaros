@@ -1,4 +1,3 @@
-use crate::print;
 use crate::println;
 use alloc::vec::Vec;
 use spin::Mutex;
@@ -23,7 +22,7 @@ pub struct PciDevice {
 
 static DEVICES: Mutex<Vec<PciDevice>> = Mutex::new(Vec::new());
 
-fn config_read_u32(bus: u8, dev: u8, func: u8, offset: u16) -> u32 {
+pub fn config_read_u32(bus: u8, dev: u8, func: u8, offset: u16) -> u32 {
     let addr = 0x8000_0000u32
         | ((bus as u32) << 16)
         | ((dev as u32) << 11)
@@ -37,12 +36,26 @@ fn config_read_u32(bus: u8, dev: u8, func: u8, offset: u16) -> u32 {
     }
 }
 
-fn config_read_u16(bus: u8, dev: u8, func: u8, offset: u16) -> u16 {
+pub fn config_read_u16(bus: u8, dev: u8, func: u8, offset: u16) -> u16 {
     (config_read_u32(bus, dev, func, offset) >> (((offset & 2) as u32) * 8)) as u16
 }
 
-fn config_read_u8(bus: u8, dev: u8, func: u8, offset: u16) -> u8 {
+pub fn config_read_u8(bus: u8, dev: u8, func: u8, offset: u16) -> u8 {
     (config_read_u32(bus, dev, func, offset) >> (((offset & 3) as u32) * 8)) as u8
+}
+
+pub fn config_write_u16(bus: u8, dev: u8, func: u8, offset: u16, value: u16) {
+    let addr = 0x8000_0000u32
+        | ((bus as u32) << 16)
+        | ((dev as u32) << 11)
+        | ((func as u32) << 8)
+        | ((offset as u32) & 0xFC);
+    unsafe {
+        let mut c = Port::new(0xCF8);
+        c.write(addr);
+        let mut d = Port::new(0xCFC);
+        d.write(value as u32);
+    }
 }
 
 /// Full enumeration: scan bus 0, then any buses behind PCI-PCI bridges
@@ -64,6 +77,8 @@ pub fn enumerate() {
                 let hdr = config_read_u8(bus, dev, func, 0x0E);
                 if func == 0 {
                     multifunction = hdr & 0x80 != 0;
+                } else if !multifunction {
+                    break;
                 }
                 if config_read_u16(bus, dev, func, 0x00) == 0xFFFF {
                     break;

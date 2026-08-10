@@ -61,14 +61,24 @@ pub(crate) fn set_base(b: u32) {
 
 pub(crate) fn raw_read(lba: u32, buf: &mut [u8; SECTOR_SIZE]) -> bool {
     let Some(dev) = data_device() else { return false };
-    let base = if dev.is_secondary { 0x170 } else { 0x1F0 };
-    ata::read_sector(base, false, dev.master, *BASE.lock() + lba, buf)
+    let lba = *BASE.lock() + lba;
+    if dev.via_ahci {
+        crate::ahci::read_sector(dev.index, lba, buf)
+    } else {
+        let base = if dev.is_secondary { 0x170 } else { 0x1F0 };
+        ata::read_sector(base, false, dev.master, lba, buf)
+    }
 }
 
 pub(crate) fn raw_write(lba: u32, buf: &[u8; SECTOR_SIZE]) -> bool {
     let Some(dev) = data_device() else { return false };
-    let base = if dev.is_secondary { 0x170 } else { 0x1F0 };
-    ata::write_sector(base, false, dev.master, *BASE.lock() + lba, buf)
+    let lba = *BASE.lock() + lba;
+    if dev.via_ahci {
+        crate::ahci::write_sector(dev.index, lba, buf)
+    } else {
+        let base = if dev.is_secondary { 0x170 } else { 0x1F0 };
+        ata::write_sector(base, false, dev.master, lba, buf)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

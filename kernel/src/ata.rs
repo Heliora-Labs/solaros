@@ -5,7 +5,8 @@ use x86_64::instructions::interrupts::enable_and_hlt;
 use x86_64::instructions::port::Port;
 
 pub const SECTOR_SIZE: usize = 512;
-pub const MAX_DEVICES: usize = 4;
+/// 4 PIO slots + 4 AHCI slots.
+pub const MAX_DEVICES: usize = 8;
 
 const BASE_PRIMARY: u16 = 0x1F0;
 const BASE_SECONDARY: u16 = 0x170;
@@ -20,6 +21,8 @@ const DEV_NONE: AtaDevice = AtaDevice {
     sectors: 0,
     model: [0; 40],
     capacity_mb: 0,
+    index: 0,
+    via_ahci: false,
 };
 
 static DEVICES: Mutex<[AtaDevice; MAX_DEVICES]> = Mutex::new([DEV_NONE; MAX_DEVICES]);
@@ -34,6 +37,10 @@ pub struct AtaDevice {
     pub sectors: u64,
     pub model: [u8; 40],
     pub capacity_mb: u64,
+    /// Slot index in the device table (route for AHCI reads/writes).
+    pub index: usize,
+    /// True when served by the AHCI driver (DMA) instead of PIO ATA.
+    pub via_ahci: bool,
 }
 
 impl AtaDevice {
@@ -48,6 +55,13 @@ impl AtaDevice {
 
 pub fn device(index: usize) -> AtaDevice {
     DEVICES.lock()[index]
+}
+
+/// Registers a present device (used by the AHCI driver for slots 4..7).
+pub fn set_device(index: usize, dev: AtaDevice) {
+    let mut store = DEVICES.lock();
+    store[index] = dev;
+    DEVICE_COUNT.fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn device_count() -> usize {

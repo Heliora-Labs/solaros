@@ -7,6 +7,7 @@ extern crate alloc;
 mod ata;
 mod boot;
 mod acpi;
+mod ahci;
 mod apic;
 mod commands;
 mod crc;
@@ -340,6 +341,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     interrupts::sleep_ms(90);
     users::init();
+
+    interrupts::sleep_ms(70);
+    let ahci_count = ahci::init();
+    boot::ok(format_args!("AHCI: {} disk(s)", ahci_count));
+    for i in ata::MAX_DEVICES / 2..ata::MAX_DEVICES {
+        let d = ata::device(i);
+        if d.present {
+            interrupts::sleep_ms(90);
+            boot::ok(format_args!(
+                "Disk {}: [AHCI] {} sectors ({} MB), LBA48, {}",
+                i,
+                d.sectors,
+                d.capacity_mb,
+                d.model_str()
+            ));
+        }
+    }
+
     match fs::mount() {
         Ok(()) => {
             let g = crate::ext4::groups();
