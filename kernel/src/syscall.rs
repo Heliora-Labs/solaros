@@ -120,16 +120,88 @@ extern "C" fn syscall_dispatch(frame: *mut SyscallFrame) -> u8 {
             0
         }
         4 => {
-            let _fd = f.rdi;
+            let fd = f.rdi;
             let buf = f.rsi;
-            let len = f.rdx;
-            if buf == 0
-                || len == 0
-                || !crate::mem::is_user_range(buf, core::cmp::min(len, 4096))
-            {
+            let cap = f.rdx;
+            if fd != 0 || buf == 0 || cap == 0 {
                 f.rax = u64::MAX;
                 return 0;
             }
+            let n = core::cmp::min(cap, 64);
+            if !crate::mem::is_user_range(buf, n) {
+                crate::serial::write_fmt(format_args!(
+                    "[user] read: rejected range {:#x}+{}\n",
+                    buf, n
+                ));
+                f.rax = u64::MAX;
+                return 0;
+            }
+            let c = crate::input::read_char();
+            let mut enc = [0u8; 4];
+            let cbytes = c.encode_utf8(&mut enc);
+            if cbytes.len() > n as usize {
+                f.rax = 0;
+                return 0;
+            }
+            unsafe {
+                core::ptr::copy_nonoverlapping(cbytes.as_ptr(), buf as *mut u8, cbytes.len());
+            }
+            f.rax = cbytes.len() as u64;
+            0
+        }
+        7 => {
+            let op = f.rdi;
+            let a = f.rsi;
+            match op {
+                0 => {
+                    crate::framebuffer::clear();
+                }
+                1 => {
+                    let r = ((a >> 16) & 0xFF) as u8;
+                    let g = ((a >> 8) & 0xFF) as u8;
+                    let b = (a & 0xFF) as u8;
+                    crate::framebuffer::set_fg(crate::framebuffer::Rgb(r, g, b));
+                }
+                2 => {
+                    crate::framebuffer::reset_colors();
+                }
+                3 => {
+                    crate::framebuffer::backspace();
+                }
+                _ => {}
+            }
+            f.rax = 0;
+            0
+        }
+        8 => {
+            let ptr = f.rdi;
+            let len = f.rsi;
+            let n = core::cmp::min(len, 512);
+            if ptr == 0 || len == 0 || !crate::mem::is_user_range(ptr, n) {
+                crate::serial::write_fmt(format_args!(
+                    "[user] exec: rejected range {:#x}+{}\n",
+                    ptr, n
+                ));
+                f.rax = u64::MAX;
+                return 0;
+            }
+            let mut scratch = [0u8; 512];
+            unsafe {
+                core::ptr::copy_nonoverlapping(ptr as *const u8, scratch.as_mut_ptr(), n as usize);
+            }
+            let bytes = &scratch[..n as usize];
+            let text = match core::str::from_utf8(bytes) {
+                Ok(t) => t,
+                Err(_) => {
+                    crate::serial::write_fmt(format_args!(
+                        "[user] exec: non-UTF8 command\n"
+                    ));
+                    f.rax = u64::MAX;
+                    return 0;
+                }
+            };
+            let chars: alloc::vec::Vec<char> = text.chars().collect();
+            crate::commands::execute(&chars);
             f.rax = 0;
             0
         }

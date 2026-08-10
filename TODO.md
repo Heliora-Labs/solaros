@@ -42,7 +42,13 @@
   - `kernel/src/syscall.rs`: write(3) — fd/len clamp 256 + `mem::is_user_range` guard + scratch kopya; read(4) stub; `kernel/src/mem.rs`: `is_user_range`/`check_one_page` (huge-page seviyelerini tanır)
   - Sabitlenen hata: framebuffer `CONSOLE` kilidi kesmeler açıkken alınıyordu → timer IRQ kilitli kernel task'ı preempt edince tüm konsol yazımları spinlock'ta asılı kalıyordu → 12 çağrının tümü `without_interrupts` içine alındı (serial.rs zaten doğruydu)
   - BIOS + UEFI/OVMF E2E: `[elf] loaded PIE` → `[user] hello from ELF (write syscall)` → 5× `loop iteration via write` → `bye` → `[sched] task 3 'demo-user' terminated`; blinky/demo-count/terminal prompt kesintisiz, panic yok
-- [ ] 2e: Shell'i userspace'e taşıma (init + terminal process)
+- [x] 2e: Shell'i userspace'e taşıma (init + terminal process)
+  - `user/` crate'i tam interaktif shell oldu: ring-3'te banner/prompt, satır düzenleme (backspace, Ctrl-C iptal), 50'lik sabit-boy history (heap yok), builtin'ler (help/echo/count/version/clear/color/history/help2) tamamen user-space; kernel bağımlı komutlar (fs/users/settings/solarfetch...) exec syscall köprüsüyle
+  - Yeni syscalls: read(4) — COM1/PS/2 birleşik bloklayan `input::read_char` (UTF-8 tek char); console(7) — clear/set_fg/reset/backspace; exec(8) — komut satırını kernel commands::execute'e köprü (len<=512, is_user_range guard)
+  - `kernel/src/input.rs`: serial + klavye birleşik girdi; COM1 RX IRQ (IRQ4, FCR trigger 1 + IER) → lock-free ring (klavye RAW_BUF deseni); poll fallback; `serial::try_read_byte`; terminal::read_line (passwd/login prompt'ları) input üzerinden
+  - `kernel/src/main.rs`: terminal::run() kaldırıldı → task 0 idle (hlt + tick-stall watchdog), init task shell'i ring-3'e sokuyor; banner kernel'den user shell'e taşındı
+  - Sabitlenen hatalar: (1) cmd_echo `line[lens[0]..]` NUL'ları basıyordu → `..len`; (2) E2E: `-serial stdio` Windows'ta `\r`'ı hiç teslim etmiyor, per-char yazımda bile kayıplar → `-serial tcp:127.0.0.1:5555,server=on,wait=off` + .NET TcpClient (kök neden qemu/Windows stdio, ürün değil; UART init FIFO'yu sildiğinden boot-öncesi girdi de kaybolur)
+  - BIOS + UEFI/OVMF E2E: help/echo/backspace-düzenleme/version/count/history(user-space)/whoami/solarfetch/xxbadcmd/color/passwd(maskeli)/login/ls/Ctrl-C/help2 — tümü çalışıyor, prompt her komuttan sonra yeniden basılıyor, blinky/demo-count kesintisiz, panic yok
 
 ## Faz 3 — Gerçek diskler
 - [ ] 3a: PCI enumeration (config space tarama) + cihaz listesi

@@ -17,6 +17,7 @@ mod framebuffer;
 mod fs;
 mod gdt;
 mod heap;
+mod input;
 mod interrupts;
 mod keyboard;
 mod mem;
@@ -203,6 +204,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     interrupts::init();
     interrupts::sleep_ms(120);
+    serial::enable_rx_irq();
 
     let acpi = acpi::init(boot_info);
     if let Some(a) = &acpi {
@@ -336,16 +338,24 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     sched::init();
     sched::spawn("blinky-a", demo_blinky_a);
     sched::spawn("demo-count", demo_count);
-    sched::spawn("demo-user", demo_user);
+    sched::spawn("init", demo_user);
 
-    framebuffer::clear();
-    println!();
-    framebuffer::set_colors(framebuffer::ACCENT, framebuffer::BG);
-    println!("          S O L A R   O S   {}", OS_VERSION);
-    framebuffer::reset_colors();
-    println!();
-
-    terminal::run();
+    // Task 0 (kernel) becomes the idle task: halt until an interrupt, with the
+    // same LAPIC tick-stall watchdog the terminal loop used.
+    let mut last_ticks = interrupts::ticks();
+    let mut last_tsc = interrupts::rdtsc();
+    loop {
+        let now_ticks = interrupts::ticks();
+        let now_tsc = interrupts::rdtsc();
+        if now_ticks != last_ticks {
+            last_ticks = now_ticks;
+            last_tsc = now_tsc;
+        } else if now_tsc.wrapping_sub(last_tsc) > 3_000_000_000 {
+            interrupts::rearm();
+            last_tsc = interrupts::rdtsc();
+        }
+        x86_64::instructions::interrupts::enable_and_hlt();
+    }
 }
 
 fn demo_blinky_a() {
@@ -368,7 +378,7 @@ fn demo_count() {
     }
 }
 
-/// The user program, compiled as a PIE ELF64 by the `user` crate (a
+/// The user shell, compiled as a PIE ELF64 by the `user` crate (a
 /// build-dependency artifact) and embedded into the kernel image.
 static USER_ELF: &[u8] = include_bytes!(env!("USER_ELF"));
 
@@ -376,12 +386,12 @@ fn demo_user() {
     let prog = match elf::load_user_elf(USER_ELF) {
         Some(p) => p,
         None => {
-            crate::serial::write_fmt(format_args!("[user] ELF load failed\n"));
+            crate::serial::write_fmt(format_args!("[init] ELF load failed\n"));
             return;
         }
     };
     crate::serial::write_fmt(format_args!(
-        "[user] ELF ({} bytes) loaded, entering ring 3\n",
+        "[init] shell ELF ({} bytes) loaded, entering ring 3\n",
         USER_ELF.len()
     ));
 

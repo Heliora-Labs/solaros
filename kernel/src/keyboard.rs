@@ -179,21 +179,29 @@ pub fn process_scancode(scancode: u8) {
     push_byte(scancode);
 }
 
+/// Decodes at most one raw scancode into a `DecodedKey`. Returns None when
+/// the raw ring is empty or the scancode sequence is not complete yet.
+pub fn decode_one() -> Option<DecodedKey> {
+    let mut kb = KEYBOARD.lock();
+    switch_layout_if_needed(&mut kb);
+    let sc = pop_byte()?;
+    match &mut *kb {
+        ActiveKeyboard::Tr(k) => k
+            .add_byte(sc)
+            .ok()
+            .flatten()
+            .and_then(|e| k.process_keyevent(e)),
+        ActiveKeyboard::Us(k) => k
+            .add_byte(sc)
+            .ok()
+            .flatten()
+            .and_then(|e| k.process_keyevent(e)),
+    }
+}
+
 pub fn drain<F: FnMut(DecodedKey)>(mut f: F) {
     loop {
-        let decoded: Option<DecodedKey> = {
-            let mut kb = KEYBOARD.lock();
-            switch_layout_if_needed(&mut kb);
-            let mut out: Option<DecodedKey> = None;
-            if let Some(sc) = pop_byte() {
-                let r = match &mut *kb {
-                    ActiveKeyboard::Tr(k) => k.add_byte(sc).ok().flatten().and_then(|e| k.process_keyevent(e)),
-                    ActiveKeyboard::Us(k) => k.add_byte(sc).ok().flatten().and_then(|e| k.process_keyevent(e)),
-                };
-                out = r;
-            }
-            out
-        };
+        let decoded: Option<DecodedKey> = decode_one();
         match decoded {
             Some(key) => f(key),
             None => break,

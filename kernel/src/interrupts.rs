@@ -79,6 +79,7 @@ pub fn sleep_ms(ms: u64) {
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard,
+    Serial,
 }
 
 impl InterruptIndex {
@@ -140,7 +141,7 @@ static IDT: spin::LazyLock<InterruptDescriptorTable> = spin::LazyLock::new(|| {
         let handler: extern "x86-interrupt" fn(InterruptStackFrame) = match vec {
             34 => ate_irq_34,
             35 => ate_irq_35,
-            36 => ate_irq_36,
+            36 => serial_interrupt_handler,
             37 => ate_irq_37,
             38 => ate_irq_38,
             39 => ate_irq_39,
@@ -266,6 +267,15 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_frame: InterruptStackFrame
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+    }
+    crate::apic::eoi();
+}
+
+extern "x86-interrupt" fn serial_interrupt_handler(_frame: InterruptStackFrame) {
+    crate::input::serial_irq();
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Serial.as_u8());
     }
     crate::apic::eoi();
 }

@@ -30,3 +30,30 @@ pub fn write_fmt(args: fmt::Arguments) {
         }
     });
 }
+
+/// Enables the "received data available" interrupt (IRQ4): FIFO with a 1-byte
+/// trigger so each incoming byte raises an interrupt immediately. The console
+/// input path drains the receiver from the IRQ handler into a software ring.
+pub fn enable_rx_irq() {
+    without_interrupts(|| {
+        let mut fcr = unsafe { x86_64::instructions::port::Port::<u8>::new(0x3FA) };
+        let mut ier = unsafe { x86_64::instructions::port::Port::<u8>::new(0x3F9) };
+        unsafe {
+            fcr.write(0x01);
+            ier.write(0x01);
+        }
+    });
+}
+
+/// Peeks the COM1 line status register and returns one byte if the receiver
+/// holds data. Polled by the console input path; no UART IRQ is enabled.
+pub fn try_read_byte() -> Option<u8> {
+    without_interrupts(|| {
+        let mut lsr = unsafe { x86_64::instructions::port::Port::<u8>::new(0x3FD) };
+        if unsafe { lsr.read() } & 0x01 == 0 {
+            return None;
+        }
+        let mut dr = unsafe { x86_64::instructions::port::Port::<u8>::new(0x3F8) };
+        Some(unsafe { dr.read() })
+    })
+}
