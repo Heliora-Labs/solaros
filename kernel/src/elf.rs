@@ -109,13 +109,17 @@ pub fn load_user_elf(blob: &[u8]) -> Option<LoadedUserProgram> {
         crate::serial::write_fmt(format_args!("[elf] image alloc failed\n"));
         return None;
     }
-    let base = block - min_vaddr;
+    // The image is linked in the high half (e.g. 0xffff_8000_1000_0000), so
+    // `min_vaddr` is huge and `block` is small: the base ends up in the PMO
+    // window again, and every base-relative address must be computed with
+    // wrapping arithmetic (debug builds panic on the overflow otherwise).
+    let base = block.wrapping_sub(min_vaddr);
 
     for ph in &phdrs {
         if ph.p_type != PT_LOAD {
             continue;
         }
-        let dst = (base + ph.p_vaddr) as usize;
+        let dst = base.wrapping_add(ph.p_vaddr) as usize;
         let src = ph.p_offset as usize;
         if src.checked_add(ph.p_filesz as usize).map_or(true, |s| s > blob.len()) {
             crate::serial::write_fmt(format_args!("[elf] segment exceeds image\n"));
@@ -164,11 +168,11 @@ pub fn load_user_elf(blob: &[u8]) -> Option<LoadedUserProgram> {
         "[elf] loaded PIE: {} bytes @ {:#x}, entry {:#x}, stack top {:#x}\n",
         image_size,
         block,
-        base + e_entry,
+        base.wrapping_add(e_entry),
         stack + USER_STACK_BYTES
     ));
     Some(LoadedUserProgram {
-        entry: base + e_entry,
+        entry: base.wrapping_add(e_entry),
         stack_top: stack + USER_STACK_BYTES,
     })
 }
@@ -178,7 +182,7 @@ pub fn load_user_elf(blob: &[u8]) -> Option<LoadedUserProgram> {
 /// static PIE (no external symbols). The dynamic table itself was copied into
 /// memory by the load loop above.
 fn apply_relocations(base: u64, dyn_ph: &Phdr) {
-    let dyn_base = (base + dyn_ph.p_vaddr) as *const u64;
+    let dyn_base = base.wrapping_add(dyn_ph.p_vaddr) as *const u64;
     let mut rela_addr: u64 = 0;
     let mut rela_size: u64 = 0;
     let mut rela_ent: u64 = 24;
@@ -202,13 +206,13 @@ fn apply_relocations(base: u64, dyn_ph: &Phdr) {
     let mut off: u64 = 0;
     let mut relocs: u64 = 0;
     while off + 24 <= rela_size {
-        let r = (base + rela_addr + off) as *const u8;
+        let r = base.wrapping_add(rela_addr).wrapping_add(off) as *const u8;
         let r_offset = unsafe { (r as *const u64).read() };
         let r_info = unsafe { (r.add(8) as *const u64).read() };
         let r_addend = unsafe { (r.add(16) as *const u64).read() };
         if (r_info & 0xffff_ffff) as u32 == R_X86_64_RELATIVE {
             unsafe {
-                ((base + r_offset) as *mut u64).write(base + r_addend);
+                (base.wrapping_add(r_offset) as *mut u64).write(base.wrapping_add(r_addend));
             }
             relocs += 1;
         }

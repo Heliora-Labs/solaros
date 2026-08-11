@@ -2,3 +2,6 @@ target/
 disk.img
 *.img
 run-qemu.ps1
+run-qemu.sh
+e2e.py
+logs/
