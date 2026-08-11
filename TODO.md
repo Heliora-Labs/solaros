@@ -51,15 +51,23 @@
   - BIOS + UEFI/OVMF E2E: help/echo/backspace-editing/version/count/history(user-space)/whoami/solarfetch/xxbadcmd/color/passwd(masked)/login/ls/Ctrl-C/help2 - all working, prompt re-printed after every command, blinky/demo-count uninterrupted, no panics
 
 ## Phase 3 - Real disks
-- [x] 3a: PCI enumeration (config space scan) + device list
-  - `kernel/src/pci.rs`: legacy PIO config space (0xCF8/0xCFC) full enumeration - bus 0 + secondary buses behind PCI-PCI bridges (type-1 header, secondary bus 0x19; discovered-bus queue, MAX_DEVICES=64)
+- [x] 3a: PCI enumeration (config space scan) + device list  - `kernel/src/pci.rs`: legacy PIO config space (0xCF8/0xCFC) full enumeration - bus 0 + secondary buses behind PCI-PCI bridges (type-1 header, secondary bus 0x19; discovered-bus queue, MAX_DEVICES=64)
   - Per device: vendor/device/class/subclass/progif/header_type/IRQ line; class/subclass -> readable names (storage/IDE, bridge/Host, display/VGA, network, serialbus/USB...), known-QEMU-device table (8086:1237 PIIX3 host, 7000 ISA, 7010 IDE, 1234:1111 VGA, 8086:100e e1000, VirtIO...)
   - Boot prints `[ OK ] PCI: 5 devices found` + one line per device; `pci` command (from the shell via the exec bridge) prints the full list; added to COMMANDS + user help
   - ECAM (MCFG) deliberately not done - PIO suffices for QEMU `pc` and bus 0 on real hardware; needed for real multi-root-port (1c/3d)
   - BIOS + UEFI/OVMF E2E: boot lines + `pci` command list the same 5 devices, version/whoami regression clean, no panics
-- [ ] 3b: AHCI driver (HBA init, command list, DMA, 48-bit LBA, read+write)
+- [x] 3b: AHCI driver (HBA init, command list, DMA, 48-bit LBA, read+write)
+  - `kernel/src/ahci.rs`: class 01/06 SATA controller from the PCI list, BAR5 (ABAR) -> HBA reset + AHCI enable, per-port DMA memory (CLB/FIS/cmd table via the heap/PMO window), link bring-up (SSTS DET=3), IDENTIFY DMA, READ/WRITE DMA EXT (0x25/0x35), devices registered in ATA slots 4..7 (`via_ahci` flag); the fs layer routes raw read/write through AHCI transparently
+  - **Not yet verified in QEMU/Linux:** code carries an in-progress POST-IDENTIFY IO test with debug prints (`[AHCI] dma-read-ok ...`) - the PIO-vs-DMA state question was unresolved at commit time; needs a real `-device ich9-ahci` boot + fs `wtest` regression before calling it solid
 - [ ] 3c: MBR/GPT partition parsing + data partition mount (instead of formatting the whole raw disk as ext4)
 - [ ] 3d: NVMe driver (after AHCI, optional)
+
+## Phase 3.5 - Linux dev environment + E2E harness (in progress)
+- [x] 3.5a: Switch dev host to Linux/Arch: `rustup` + pinned `nightly-2026-08-05` (rust-src, llvm-tools-preview, x86_64-unknown-none/uefi), `qemu-full` + `edk2-ovmf`, `xorriso`/`mtools`; full workspace `cargo build` produces BIOS + UEFI images (bindeps via the pinned nightly)
+- [x] 3.5b: ELF loader debug-build panic fix - user PIE is linked high-half (0xffff800010000000); `block - min_vaddr` overflow-checked in dev profile panicked at init. All base-relative math now uses `wrapping_*` (commit 824d46a); dev (fast) builds are the primary test profile
+- [ ] 3.5c: Linux QEMU boot + logging regression: BIOS (KVM) and UEFI (OVMF) boot logs, AHCI SATA validation, fs/users E2E - NOT done yet; local-only helpers (`run-qemu.sh`, `e2e.py`, `e2e-run.sh`, gitignored) exist but are UNFINISHED
+  - Known harness issues to fix next time: QEMU unix-serial drops the early boot bytes once the demo-task flood (`[demo-count]` every 200ms) exceeds the chardev buffer, so the shell prompt is lost for a late client; the e2e client needs a bounded final drain (the flood never yields silence) and an early-connect runner (present) to capture the prompt before it scrolls out
+- [ ] 3.5d: settle the `.cargo/config.toml` `[unstable] bindeps = true` vs stable cargo: the workspace only builds under the pinned nightly toolchain (rust-toolchain.toml), which is fine, but bumpers should `cargo +nightly-2026-08-05 build` explicitly if CARGO_BIN_FILE_* envs are missing
 
 ## Phase 4 - Daily-use threshold + installation
 - [ ] 4a: ISO image production (BIOS+UEFI dual boot, script packaging bootloader images) - "directly installable" target output
@@ -72,8 +80,9 @@
 - [ ] After each phase re-run ext4 e2e + JBD crash tests (regression)
 
 ## Known limitations (accepted)
-- No hardware support beyond PIO ATA + PS/2 keyboard (AHCI/XHCI/NVMe needed)
-- Single core; PIC-based interrupts (no APIC/IOAPIC)
-- Data disk ceiling: 128GiB (LBA28, 1024 groups); the whole raw disk is formatted as ext4 (no partition parsing)
-- UEFI image boots in OVMF/QEMU (kernel side); real machine + Secure Boot not yet tried (unsigned bootloader blocks it)
-- No clock (uptime only from PIT ticks)
+- Real hardware boot (1c) still untried; UEFI image boots only in OVMF/QEMU so far (Secure Boot blocked until the bootloader is signed)
+- Single core only; no SMP (IOAPIC/LAPIC drives the timer/IRQs on the BSP at CPU0)
+- Any USB (XHCI/EHCI) and NVMe sticks remain unsupported; keyboard is PS/2 only (1d)
+- Data disk ceiling ~128GiB (LBA28); the whole raw disk is formatted as one filesystem (no MBR/GPT partition parsing yet, 3c)
+- No RTC/CMOS clock - uptime is tick-based only (4d)
+- Single address space: user mode can still reach the PMO window until per-process page tables (mem.rs marks the PML4E as user-accessible).

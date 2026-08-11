@@ -4,4 +4,5 @@ disk.img
 run-qemu.ps1
 run-qemu.sh
 e2e.py
+e2e-run.sh
 logs/
