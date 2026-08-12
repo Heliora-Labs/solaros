@@ -11,7 +11,7 @@ pub const MAX_DEVICES: usize = 8;
 const BASE_PRIMARY: u16 = 0x1F0;
 const BASE_SECONDARY: u16 = 0x170;
 const CMD_IDENTIFY: u8 = 0xEC;
-const TIMEOUT_TICKS: u64 = 30;
+const TIMEOUT_TICKS: u64 = 3000;
 
 const DEV_NONE: AtaDevice = AtaDevice {
     present: false,

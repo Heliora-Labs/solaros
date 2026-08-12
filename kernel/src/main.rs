@@ -384,7 +384,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     interrupts::sleep_ms(250);
 
     sched::init();
-    sched::spawn("blinky-a", demo_blinky_a);
     sched::spawn("demo-count", demo_count);
     sched::spawn("init", demo_user);
 
@@ -419,7 +418,7 @@ fn demo_count() {
     let mut n = 0u64;
     loop {
         n += 1;
-        if n % 20 == 0 {
+        if n % 200 == 0 {
             crate::serial::write_fmt(format_args!("[demo-count] {}\n", n));
         }
         interrupts::sleep_ms(10);

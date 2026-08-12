@@ -8,7 +8,7 @@ use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::interrupts;
 
-const STACK_BYTES: usize = 64 * 1024;
+const STACK_BYTES: usize = 128 * 1024;
 const MAX_TASKS: usize = 24;
 
 #[derive(Clone, Copy, PartialEq)]

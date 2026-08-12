@@ -306,79 +306,6 @@ fn identify(port: &mut Port, hba_port: usize) -> AtaDevice {
         return dev;
     }
 
-    // POST-IDENTIFY IO TEST: PIO state on this QEMU build appears to get
-    // poisoned after the first PIO command (prepare uses a stale offset).
-    // Check whether DMA commands (which reset the offset in start_dma) still
-    // transfer full sectors.
-    if issue(port, false, CMD_READ_DMA_EXT, 42, 1, 511) {
-        let dbg = unsafe { core::slice::from_raw_parts(port.dma_virt as *const u8, 512) };
-        crate::serial::write_fmt(format_args!(
-            "[AHCI] dma-read-ok lba42 head={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x} tail={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x} bytes/8={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}\n",
-            dbg[0], dbg[1], dbg[2], dbg[3], dbg[4], dbg[5], dbg[6], dbg[7],
-            dbg[504], dbg[505], dbg[506], dbg[507], dbg[508], dbg[509], dbg[510], dbg[511],
-            dbg[8], dbg[9], dbg[10], dbg[11], dbg[12], dbg[13], dbg[14], dbg[15]
-        ));
-    } else {
-        crate::serial::write_fmt(format_args!("[AHCI] dma-read FAILED\n"));
-    }
-    unsafe {
-        core::ptr::write_bytes(port.dma_virt as *mut u8, 0xAA, 512);
-    }
-    if issue(port, true, CMD_WRITE_DMA_EXT, 42, 1, 511) {
-        crate::serial::write_fmt(format_args!("[AHCI] dma-write-ok\n"));
-    } else {
-        crate::serial::write_fmt(format_args!("[AHCI] dma-write FAILED\n"));
-    }
-    unsafe {
-        core::ptr::write_bytes(port.dma_virt as *mut u8, 0, 512);
-    }
-    if issue(port, false, CMD_READ_DMA_EXT, 42, 1, 511) {
-        let dbg = unsafe { core::slice::from_raw_parts(port.dma_virt as *const u8, 512) };
-        crate::serial::write_fmt(format_args!(
-            "[AHCI] dma-reread lba42 head={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x} tail={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x} bytes/8={:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}\n",
-            dbg[0], dbg[1], dbg[2], dbg[3], dbg[4], dbg[5], dbg[6], dbg[7],
-            dbg[504], dbg[505], dbg[506], dbg[507], dbg[508], dbg[509], dbg[510], dbg[511],
-            dbg[8], dbg[9], dbg[10], dbg[11], dbg[12], dbg[13], dbg[14], dbg[15]
-        ));
-    } else {
-        crate::serial::write_fmt(format_args!("[AHCI] dma-reread FAILED\n"));
-    }
-
-    let dbg = unsafe { core::slice::from_raw_parts(port.dma_virt as *const u8, 512) };
-    crate::serial::write_fmt(format_args!(
-        "[AHCI] dbg dma_virt={:#x} dba={:#x} dma[0..32]={:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}\n",
-        port.dma_virt,
-        virt_to_phys(port.dma_virt),
-        dbg[0], dbg[1], dbg[2], dbg[3], dbg[4], dbg[5], dbg[6], dbg[7],
-        dbg[8], dbg[9], dbg[10], dbg[11], dbg[12], dbg[13], dbg[14], dbg[15],
-        dbg[16], dbg[17], dbg[18], dbg[19], dbg[20], dbg[21], dbg[22], dbg[23],
-        dbg[24], dbg[25], dbg[26], dbg[27], dbg[28], dbg[29], dbg[30], dbg[31]
-    ));
-    crate::serial::write_fmt(format_args!(
-        "[AHCI] dbg tfd={:08x} is={:08x} cmd={:08x}\n",
-        mmio_read(port_reg(port.port_base, PxTFD)),
-        mmio_read(port_reg(port.port_base, PxIS)),
-        mmio_read(port_reg(port.port_base, PxCMD))
-    ));
-    unsafe {
-        let clb = port.clb_virt as *const u32;
-        let ct = port.ct_virt as *const u32;
-        let prd = (port.ct_virt + 128) as *const u32;
-        crate::serial::write_fmt(format_args!(
-            "[AHCI] dbg clb={:#x} ct={:#x} hdr={:08x} {:08x} {:08x} {:08x} prd={:08x} {:08x} {:08x} {:08x}\n",
-            port.clb_virt,
-            port.ct_virt,
-            *clb.add(0),
-            *clb.add(1),
-            *clb.add(2),
-            *clb.add(3),
-            *prd.add(0),
-            *prd.add(1),
-            *prd.add(2),
-            *prd.add(3)
-        ));
-    }
-
     let mut tmp = [0u16; 256];
     unsafe {
         core::ptr::copy_nonoverlapping(port.dma_virt as *const u8, tmp.as_mut_ptr() as *mut u8, 512);
@@ -469,26 +396,6 @@ fn issue(port: &mut Port, write: bool, command: u8, lba: u64, count: u16, dbc: u
     }
 
     // ---- issue ----
-    unsafe {
-        let prd = (ct + 128) as *const u32;
-        let e = clb as *const u32;
-        crate::serial::write_fmt(format_args!(
-            "[AHCI] dbg pre-ci hdr={:08x} {:08x} {:08x} {:08x} prd={:08x} {:08x} {:08x} {:08x}\n",
-            read_volatile(e.add(0)),
-            read_volatile(e.add(1)),
-            read_volatile(e.add(2)),
-            read_volatile(e.add(3)),
-            read_volatile(prd.add(0)),
-            read_volatile(prd.add(1)),
-            read_volatile(prd.add(2)),
-            read_volatile(prd.add(3))
-        ));
-    }
-    crate::serial::write_fmt(format_args!("[AHCI] dbg WAIT-MARKER-BEFORE-CI\n"));
-    let mark = crate::interrupts::ticks() + 3000;
-    while crate::interrupts::ticks() < mark {
-        enable_and_hlt();
-    }
     mmio_write(port_reg(pb, PxIS), 0xFFFF_FFFF);
     mmio_write(port_reg(pb, PxCI), 1 << 0);
 
@@ -504,11 +411,6 @@ fn issue(port: &mut Port, write: bool, command: u8, lba: u64, count: u16, dbc: u
             ));
             return false;
         }
-        enable_and_hlt();
-    }
-    crate::serial::write_fmt(format_args!("[AHCI] dbg WAIT-MARKER-AFTER-CMD\n"));
-    let mark2 = crate::interrupts::ticks() + 3000;
-    while crate::interrupts::ticks() < mark2 {
         enable_and_hlt();
     }
 
